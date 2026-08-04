@@ -61,10 +61,15 @@ p { margin: 0; color: #d9d9ce; }
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-padding-top: 88px;
+  scroll-padding-bottom: calc(env(safe-area-inset-bottom) + 380px);
   padding-bottom: calc(env(safe-area-inset-bottom) + 24px);
   display: flex; flex-direction: column; justify-content: flex-start;
   padding-top: 24px;
   gap: 18px;
+}
+.connect-card:focus-within {
+  padding-bottom: calc(env(safe-area-inset-bottom) + max(360px, var(--keyboard-inset-bottom) + 72px));
 }
 .hero-orb {
   width: 92px; height: 92px; border-radius: 32px;

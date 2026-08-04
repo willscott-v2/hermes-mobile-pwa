@@ -26,7 +26,7 @@ test('connect screen can scroll on a short iPhone viewport and shows onboarding 
   await expect(page.getByRole('button', { name: 'Connect' })).toBeVisible();
 });
 
-test('setup inputs keep iOS-safe font sizes to prevent Safari focus zoom', async ({ page }) => {
+test('setup inputs keep iOS-safe font sizes and focused fields get keyboard scroll room', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 664 });
   await page.goto('/?e2e=ios-input-fonts');
   const metrics = await page.locator('input, select, textarea').evaluateAll((nodes) => nodes.map((node) => ({
@@ -41,6 +41,19 @@ test('setup inputs keep iOS-safe font sizes to prevent Safari focus zoom', async
     expect(metric.left).toBeGreaterThanOrEqual(0);
     expect(metric.right).toBeLessThanOrEqual(390);
   }
+
+  await page.locator('input[type="password"]').focus();
+  await page.waitForTimeout(260);
+  const focused = await page.locator('.connect-card').evaluate((card) => ({
+    scrollTop: card.scrollTop,
+    clientHeight: card.clientHeight,
+    scrollHeight: card.scrollHeight,
+    paddingBottom: window.getComputedStyle(card).paddingBottom,
+    passwordBottom: document.querySelector<HTMLInputElement>('input[type="password"]')?.getBoundingClientRect().bottom ?? 0,
+  }));
+  expect(focused.scrollHeight).toBeGreaterThan(focused.clientHeight + 300);
+  expect(Number.parseFloat(focused.paddingBottom)).toBeGreaterThanOrEqual(300);
+  expect(focused.passwordBottom).toBeLessThan(664);
 });
 
 test('sessions screen has an independently scrollable session list', async ({ page }) => {

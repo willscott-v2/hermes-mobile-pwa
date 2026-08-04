@@ -1,5 +1,5 @@
 import { ArrowLeft, Bot, CheckCircle2, CircleAlert, Clock3, Lock, MessageCircle, Paperclip, Plus, Radio, RefreshCw, Search, SendHorizonal, ShieldCheck, Sparkles, WifiOff, X } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FocusEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AuthCapability, AuthMode, AuthSession, ChatMessage, eventToMessages, GatewayHandle, HermesApiClient, HermesSession, SessionPage, normalizeServerUrl } from './lib/hermesApi';
 import { MockHermesClient, starterMessages } from './lib/mockHermes';
 import { formatMessageTextForMobile } from './lib/mobileText';
@@ -180,6 +180,11 @@ export function App() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [screen, client, auth, activeSession?.id, chatStatus]);
+
+
+  function scrollSetupFieldIntoView(event: FocusEvent<HTMLInputElement | HTMLSelectElement>) {
+    window.setTimeout(() => event.currentTarget.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' }), 180);
+  }
 
   async function checkServer() {
     if (connection.mode === 'mock') {
@@ -482,15 +487,15 @@ export function App() {
             <form onSubmit={connect} className="stack">
               <label>
                 <span>Mode</span>
-                <select value={connection.mode} onChange={(event) => setConnection((state) => ({ ...state, mode: event.target.value as AuthMode }))}>
+                <select value={connection.mode} onFocus={scrollSetupFieldIntoView} onChange={(event) => setConnection((state) => ({ ...state, mode: event.target.value as AuthMode }))}>
                   <option value="password">Password</option>
                   <option value="token">Token (experimental)</option>
                   <option value="mock">Mock demo</option>
                 </select>
               </label>
-              {connection.mode !== 'mock' && <label><span>Hermes URL</span><input inputMode="url" placeholder="http://mac.tailnet:9119" value={connection.rawUrl} onChange={(event) => setConnection((state) => ({ ...state, rawUrl: event.target.value, status: 'idle' }))} /></label>}
-              {connection.mode === 'password' && <div className="grid2"><label><span>Username</span><input autoComplete="username" value={connection.username} onChange={(event) => setConnection((state) => ({ ...state, username: event.target.value }))} /></label><label><span>Password</span><input type="password" autoComplete="current-password" value={connection.password} onChange={(event) => setConnection((state) => ({ ...state, password: event.target.value }))} /></label></div>}
-              {connection.mode === 'token' && <><label><span>Dashboard bearer token</span><input type="password" autoComplete="off" value={connection.token} onChange={(event) => setConnection((state) => ({ ...state, token: event.target.value }))} /></label><div className="security-note"><CircleAlert size={16} /> Experimental: API_SERVER_KEY does not work here. Use only with a dashboard token provider for these routes.</div><label className="check-row"><input type="checkbox" checked={connection.rememberToken} onChange={(event) => setConnection((state) => ({ ...state, rememberToken: event.target.checked }))} /> Remember token on this device</label></>}
+              {connection.mode !== 'mock' && <label><span>Hermes URL</span><input inputMode="url" placeholder="http://mac.tailnet:9119" value={connection.rawUrl} onFocus={scrollSetupFieldIntoView} onChange={(event) => setConnection((state) => ({ ...state, rawUrl: event.target.value, status: 'idle' }))} /></label>}
+              {connection.mode === 'password' && <div className="grid2"><label><span>Username</span><input autoComplete="username" value={connection.username} onFocus={scrollSetupFieldIntoView} onChange={(event) => setConnection((state) => ({ ...state, username: event.target.value }))} /></label><label><span>Password</span><input type="password" autoComplete="current-password" value={connection.password} onFocus={scrollSetupFieldIntoView} onChange={(event) => setConnection((state) => ({ ...state, password: event.target.value }))} /></label></div>}
+              {connection.mode === 'token' && <><label><span>Dashboard bearer token</span><input type="password" autoComplete="off" value={connection.token} onFocus={scrollSetupFieldIntoView} onChange={(event) => setConnection((state) => ({ ...state, token: event.target.value }))} /></label><div className="security-note"><CircleAlert size={16} /> Experimental: API_SERVER_KEY does not work here. Use only with a dashboard token provider for these routes.</div><label className="check-row"><input type="checkbox" checked={connection.rememberToken} onChange={(event) => setConnection((state) => ({ ...state, rememberToken: event.target.checked }))} /> Remember token on this device</label></>}
               <div className="button-row">
                 <button type="button" className="secondary" onClick={checkServer}>{connection.mode === 'mock' ? 'Enable mock' : 'Check server'}</button>
                 <button type="submit" className="primary">Connect</button>
