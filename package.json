@@ -1,0 +1,36 @@
+{
+  "name": "hermes-mobile-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mobile-first PWA companion for self-hosted Hermes Agent.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "demo:tailnet": "node scripts/tailnet-demo-server.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "qa:mobile": "node scripts/mobile-ux-qa.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "http-proxy": "^1.18.1",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "vitest": "latest"
+  }
+}

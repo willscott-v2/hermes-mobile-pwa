@@ -1,0 +1,32 @@
+# dependencies / builds
+node_modules/
+dist/
+.vite/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+
+# local env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.mobileprovision
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# local Hermes agent work notes
+.hermes/
+
+# local logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
