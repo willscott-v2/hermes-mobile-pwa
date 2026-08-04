@@ -1,4 +1,5 @@
 import { AuthSession, ChatMessage, GatewayCallbacks, GatewayHandle, HermesSession, ServerStatus, SessionPage } from './hermesApi';
+import type { RuntimeCatalog } from './runtimeOptions';
 
 const sessions: HermesSession[] = [
   { id: 'mock-weekend-reading', title: 'Weekend reading', preview: 'Summarize the three articles I saved about better sleep.', updated_at: new Date().toISOString(), message_count: 6, running: false, source: 'mock' },
@@ -13,6 +14,13 @@ export class MockHermesClient {
   }
   async authProviders() { return []; }
   capability() { return { kind: 'tokenOnly' as const }; }
+  async runtimeCatalog(): Promise<RuntimeCatalog> {
+    return {
+      profiles: [{ id: 'default', label: 'default' }, { id: 'research', label: 'research' }],
+      projects: [{ id: 'mobile-pwa', label: 'Mobile PWA' }],
+      models: [{ id: 'default', label: 'Default model' }, { id: 'fast', label: 'Fast mock model' }],
+    };
+  }
   async passwordLogin(): Promise<AuthSession> { return { mode: 'password', username: 'mock' }; }
   async sessionPage(_auth?: AuthSession, options: { limit?: number; offset?: number } = {}): Promise<SessionPage> {
     const limit = options.limit ?? 75;

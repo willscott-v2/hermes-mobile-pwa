@@ -52,6 +52,66 @@ describe('history normalization', () => {
 });
 
 
+describe('connection diagnostics and runtime catalog', () => {
+  it('diagnoses a healthy password dashboard without persisting a password', async () => {
+    const requests: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith('/api/status')) return new Response(JSON.stringify({ version: 'test', auth_required: true, gateway_running: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.endsWith('/api/auth/providers')) return new Response(JSON.stringify({ providers: [{ name: 'local', display_name: 'Local', supports_password: true }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.endsWith('/auth/password-login')) return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.endsWith('/api/auth/ws-ticket')) return new Response(JSON.stringify({ ticket: 'ticket-1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    try {
+      const client = new HermesApiClient('https://agent.example/hermes');
+      const result = await client.diagnoseConnection({ mode: 'password', username: 'will', password: 'secret' });
+
+      expect(result.ok).toBe(true);
+      expect(result.steps.map((step) => step.state)).toEqual(['passed', 'passed', 'passed', 'passed', 'passed']);
+      expect(JSON.stringify(result)).not.toContain('secret');
+      expect(requests.some((url) => url.endsWith('/api/auth/ws-ticket'))).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('diagnoses likely wrong PWA URL when status route returns html', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('<!doctype html><div id="root"></div>', { status: 200, headers: { 'content-type': 'text/html' } })) as typeof fetch;
+    try {
+      const client = new HermesApiClient('https://agent.example');
+      const result = await client.diagnoseConnection({ mode: 'password', username: '', password: '' });
+      expect(result.ok).toBe(false);
+      expect(result.steps.find((step) => step.id === 'status')?.issue).toBe('wrong-pwa-url');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('loads runtime catalog from optional dashboard endpoints', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/profiles')) return new Response(JSON.stringify({ profiles: ['default', 'research'] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.endsWith('/api/projects')) return new Response(JSON.stringify({ projects: [{ id: 'pwa', name: 'PWA' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.endsWith('/api/models')) return new Response(JSON.stringify({ models: [{ id: 'm1', label: 'Model 1' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    try {
+      const catalog = await new HermesApiClient('https://agent.example/hermes').runtimeCatalog({ mode: 'password' });
+      expect(catalog.profiles.map((profile) => profile.id)).toContain('research');
+      expect(catalog.projects[0]).toEqual({ id: 'pwa', label: 'PWA' });
+      expect(catalog.models[0]).toEqual({ id: 'm1', label: 'Model 1' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+
 describe('history API transcript fetching', () => {
   it('resolves compressed descendants before fetching messages', async () => {
     const seen: string[] = [];

@@ -7,11 +7,18 @@ async function enableMock(page: import('@playwright/test').Page) {
   await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
 }
 
-test('connect screen can scroll on a short iPhone viewport', async ({ page }) => {
+test('connect screen can scroll on a short iPhone viewport and shows onboarding diagnostics', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 520 });
   await page.goto('/?e2e=connect-scroll');
   const card = page.locator('.connect-card');
   await expect(card).toBeVisible();
+  await expect(page.getByText('Choose how to connect')).toBeVisible();
+  await expect(page.locator('.onboarding-options').getByText('Mock demo')).toBeVisible();
+  await expect(page.locator('.onboarding-options').getByText('Private dashboard')).toBeVisible();
+  await page.getByLabel('Mode').selectOption('mock');
+  await page.getByRole('button', { name: /enable mock/i }).click();
+  await expect(page.getByLabel('Connection diagnostics')).toContainText('Server URL');
+  await expect(page.getByLabel('Connection diagnostics')).toContainText('Mock mode');
   const before = await card.evaluate((node) => node.scrollTop);
   await card.evaluate((node) => { node.scrollTop = node.scrollHeight; });
   const after = await card.evaluate((node) => node.scrollTop);
@@ -29,13 +36,17 @@ test('sessions screen has an independently scrollable session list', async ({ pa
   expect(metrics.scrollHeight).toBeGreaterThanOrEqual(metrics.clientHeight);
 });
 
-test('chat composer supports compact keyboard buffer and attachment control', async ({ page }) => {
+test('chat composer supports compact keyboard buffer, runtime controls, and attachment control', async ({ page }) => {
   await enableMock(page);
   await page.getByText('Weekend reading').click();
+  await expect(page.getByLabel('Runtime controls')).toBeVisible();
+  await expect(page.getByLabel('Profile')).toBeVisible();
+  await expect(page.getByLabel('Project')).toBeVisible();
+  await expect(page.getByLabel('Model')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Attach file or screenshot' })).toBeVisible();
   await page.evaluate(() => document.documentElement.style.setProperty('--composer-bottom-buffer', '18px'));
   const box = await page.locator('.composer').boundingBox();
-  expect(box?.height ?? 0).toBeLessThan(110);
+  expect(box?.height ?? 0).toBeLessThan(180);
   await expect(page.getByPlaceholder('Message Hermes…')).toBeVisible();
 });
 

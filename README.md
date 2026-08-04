@@ -65,10 +65,13 @@ Hermes Mobile PWA focuses on that phone companion use case.
 
 - **Installable mobile PWA shell** with app icons, manifest, and offline app-shell caching.
 - **Password login flow** for Hermes dashboard auth using httpOnly cookies and WebSocket tickets.
+- **First-run onboarding and saved server profiles** for mock, private dashboard, and same-origin proxy setups without persisting passwords.
+- **Connection diagnostics** for URL normalization, dashboard status, auth providers, login/session readiness, and gateway ticket readiness.
 - **Experimental token mode** for deployments that intentionally expose dashboard-compatible bearer auth.
 - **Mock mode** for demos, screenshots, and contributor development with no live Hermes server.
 - **Recent session list** with search and new-chat flow.
 - **Live chat over `/api/ws` JSON-RPC** using `session.create`, `session.resume`, and `prompt.submit`.
+- **Composer runtime controls** for dashboard-exposed profile, project, and model options while preserving backend-default behavior when catalogs are unavailable.
 - **Transcript refresh/resume hardening** for Hermes sessions that continue under latest-descendant session IDs.
 - **Mobile transcript cleanup** that hides persisted tool/internal artifacts and keeps URLs clickable.
 - **Attachments**: images/screenshots, PDFs, and other files route to the matching Hermes attach methods when available.

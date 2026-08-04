@@ -1,4 +1,6 @@
 import { asRecord, JsonRpcEvent, JsonRpcPeer, JsonValue, parseJsonRpcMessage } from './jsonRpc';
+import { connectionIssueHint, initialDiagnosticSteps, setDiagnosticStep, type ConnectionIssueCode, type DiagnosticStep } from './connectionDiagnostics';
+import { normalizeRuntimeCatalog, type RuntimeCatalog } from './runtimeOptions';
 
 export type AuthMode = 'password' | 'token' | 'mock';
 
@@ -80,6 +82,21 @@ export interface GatewayCallbacks {
   onError?: (error: Error) => void;
 }
 
+export interface ConnectionDiagnosticInput {
+  mode: AuthMode;
+  username?: string;
+  password?: string;
+  token?: string;
+}
+
+export interface ConnectionDiagnosticResult {
+  ok: boolean;
+  normalizedUrl: string;
+  capability?: AuthCapability;
+  version?: string;
+  steps: DiagnosticStep[];
+}
+
 export function normalizeServerUrl(input: string): string | null {
   const trimmed = input.trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, '').replace(/\/+$/, '');
   if (!trimmed) return null;
@@ -117,6 +134,22 @@ export function redactForLog(value: string): string {
     .replace(/(password|token|secret)(["'\s:=]+)([^"'\s,}]+)/gi, '$1$2[redacted]');
 }
 
+function failedDiagnostic(baseUrl: string, steps: DiagnosticStep[], id: DiagnosticStep['id'], issue: ConnectionIssueCode, detail?: string): ConnectionDiagnosticResult {
+  return {
+    ok: false,
+    normalizedUrl: baseUrl,
+    steps: setDiagnosticStep(steps, id, { state: 'failed', issue, message: connectionIssueHint(issue), detail: detail ? redactForLog(detail) : undefined }),
+  };
+}
+
+async function optionalGet<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch {
+    return fallback;
+  }
+}
+
 function authHeaders(auth?: AuthSession): HeadersInit {
   return auth?.mode === 'token' && auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
 }
@@ -133,6 +166,56 @@ async function parseError(response: Response): Promise<Error> {
 
 export class HermesApiClient {
   constructor(public readonly baseUrl: string) {}
+
+  async diagnoseConnection(input: ConnectionDiagnosticInput): Promise<ConnectionDiagnosticResult> {
+    let steps = setDiagnosticStep(initialDiagnosticSteps(), 'url', { state: 'passed', message: 'URL parsed.' });
+    let status: ServerStatus;
+    try {
+      steps = setDiagnosticStep(steps, 'status', { state: 'running', message: 'Checking /api/status…' });
+      status = await this.status();
+      steps = setDiagnosticStep(steps, 'status', { state: 'passed', message: status.version ? `Dashboard responded (${status.version}).` : 'Dashboard responded.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Status check failed.';
+      return failedDiagnostic(this.baseUrl, steps, 'status', /doctype|<html|root/i.test(message) ? 'wrong-pwa-url' : 'unreachable', message);
+    }
+
+    let capability: AuthCapability;
+    try {
+      steps = setDiagnosticStep(steps, 'auth', { state: 'running', message: 'Checking auth providers…' });
+      const providers = await this.authProviders();
+      capability = this.capability(status, providers);
+      steps = setDiagnosticStep(steps, 'auth', { state: 'passed', message: capability.kind === 'passwordAvailable' ? `Password provider: ${capability.displayName}` : 'Auth capability discovered.' });
+    } catch (error) {
+      return failedDiagnostic(this.baseUrl, steps, 'auth', 'unknown', error instanceof Error ? error.message : undefined);
+    }
+
+    try {
+      if (input.mode === 'password') {
+        if (capability.kind !== 'passwordAvailable') return failedDiagnostic(this.baseUrl, steps, 'auth', 'password-provider-missing');
+        if (!input.password?.trim()) {
+          steps = setDiagnosticStep(steps, 'login', { state: 'skipped', message: 'Password provider found. Enter your password to verify login.' });
+          steps = setDiagnosticStep(steps, 'gateway', { state: 'skipped', message: 'Gateway check runs after password login.' });
+          return { ok: true, normalizedUrl: this.baseUrl, capability, version: status.version, steps };
+        }
+        steps = setDiagnosticStep(steps, 'login', { state: 'running', message: 'Checking password login…' });
+        await this.passwordLogin(capability.provider, input.username ?? '', input.password ?? '');
+        steps = setDiagnosticStep(steps, 'login', { state: 'passed', message: 'Password login accepted. Password was not stored.' });
+        steps = setDiagnosticStep(steps, 'gateway', { state: 'running', message: 'Checking WebSocket ticket…' });
+        await this.mintWsTicket();
+        steps = setDiagnosticStep(steps, 'gateway', { state: 'passed', message: 'Gateway ticket endpoint responded.' });
+      } else if (input.mode === 'token') {
+        steps = setDiagnosticStep(steps, 'login', { state: 'skipped', message: 'Token mode selected; password login skipped.' });
+        steps = setDiagnosticStep(steps, 'gateway', { state: input.token?.trim() ? 'passed' : 'skipped', message: input.token?.trim() ? 'Token supplied for gateway connection.' : 'Gateway check skipped until a token is supplied.' });
+      } else {
+        steps = setDiagnosticStep(steps, 'login', { state: 'skipped', message: 'Mock mode does not use dashboard login.' });
+        steps = setDiagnosticStep(steps, 'gateway', { state: 'skipped', message: 'Mock mode does not use the live gateway.' });
+      }
+      return { ok: true, normalizedUrl: this.baseUrl, capability, version: status.version, steps };
+    } catch (error) {
+      const active = steps.find((step) => step.state === 'running')?.id ?? 'login';
+      return failedDiagnostic(this.baseUrl, steps, active, active === 'gateway' ? 'gateway-unavailable' : 'auth-failed', error instanceof Error ? error.message : undefined);
+    }
+  }
 
   async status(): Promise<ServerStatus> {
     return this.get<ServerStatus>('/api/status');
@@ -154,6 +237,19 @@ export class HermesApiClient {
       return { kind: 'passwordAvailable', provider: password.name, displayName: password.display_name ?? password.name };
     }
     return { kind: 'oauthOnly', providers: providers.map((provider) => provider.name) };
+  }
+
+  async runtimeCatalog(auth: AuthSession): Promise<RuntimeCatalog> {
+    const [profiles, projects, models] = await Promise.all([
+      optionalGet(() => this.get<{ profiles?: unknown[] } | unknown[]>('/api/profiles', auth), [] as unknown[]),
+      optionalGet(() => this.get<{ projects?: unknown[] } | unknown[]>('/api/projects', auth), [] as unknown[]),
+      optionalGet(() => this.get<{ models?: unknown[] } | unknown[]>('/api/models', auth), [] as unknown[]),
+    ]);
+    return normalizeRuntimeCatalog({
+      profiles: Array.isArray(profiles) ? profiles as never[] : (profiles as { profiles?: never[] }).profiles,
+      projects: Array.isArray(projects) ? projects as never[] : (projects as { projects?: never[] }).projects,
+      models: Array.isArray(models) ? models as never[] : (models as { models?: never[] }).models,
+    });
   }
 
   async passwordLogin(provider: string, username: string, password: string): Promise<AuthSession> {

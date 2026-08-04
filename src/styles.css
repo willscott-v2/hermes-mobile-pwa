@@ -98,6 +98,20 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 .info-banner.ok { color: #bcffd9; border-color: rgba(60,207,145,.30); background: rgba(60,207,145,.08); }
 .info-banner.bad, .inline-banner { color: #ffd0ca; border-color: rgba(255,99,71,.32); background: rgba(255,99,71,.08); }
 .security-note { color: #b7b8b1; }
+.onboarding-panel, .diagnostic-list {
+  display: grid; gap: 10px; padding: 13px; border-radius: 18px;
+  background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.08);
+}
+.onboarding-panel strong { color: #f7f7f2; }
+.onboarding-panel small { color: #a9aaa3; line-height: 1.45; }
+.onboarding-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.onboarding-options span { padding: 7px 9px; border-radius: 999px; background: rgba(255,176,0,.10); color: #ffd16a; font-size: 12px; }
+.diagnostic-step { display: grid; grid-template-columns: 24px 1fr; gap: 8px; align-items: start; color: #b7b8b1; }
+.diagnostic-step > span { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; background: rgba(255,255,255,.07); font-size: 12px; }
+.diagnostic-step.passed > span { background: rgba(60,207,145,.16); color: #9ff0bf; }
+.diagnostic-step.failed > span { background: rgba(255,99,71,.16); color: #ffb7ac; }
+.diagnostic-step strong { display: block; color: #f7f7f2; font-size: 13px; }
+.diagnostic-step small { color: #a9aaa3; line-height: 1.35; }
 .status-pill {
   display: flex; align-items: center; gap: 5px; padding: 7px 9px; border-radius: 999px;
   font-size: 11px; color: #b7b8b1; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.08);
@@ -145,6 +159,9 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
   background: linear-gradient(180deg, transparent, rgba(5,6,7,.96) 28%);
 }
 .attachment-tray { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.runtime-controls { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.runtime-controls label { gap: 4px; font-size: 11px; }
+.runtime-controls select { min-height: 38px; border-radius: 13px; padding: 8px 9px; font-size: 12px; }
 .attachment-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 8px 10px; border-radius: 999px; background: rgba(255,255,255,.08); color: #d9d9ce; font-size: 12px; }
 .attachment-chip button { border: 0; background: rgba(255,255,255,.10); color: #f7f7f2; border-radius: 999px; width: 20px; height: 20px; display: grid; place-items: center; padding: 0; }
 .file-input { display: none; }

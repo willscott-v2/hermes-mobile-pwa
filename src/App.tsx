@@ -3,7 +3,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AuthCapability, AuthMode, AuthSession, ChatMessage, eventToMessages, GatewayHandle, HermesApiClient, HermesSession, SessionPage, normalizeServerUrl } from './lib/hermesApi';
 import { MockHermesClient, starterMessages } from './lib/mockHermes';
 import { formatMessageTextForMobile } from './lib/mobileText';
-import { clearRememberedToken, loadLastSessionId, loadLoginHint, loadRememberedToken, loadServerUrl, loadSessionCache, saveLastSessionId, saveLoginHint, saveRememberedToken, saveServerUrl, saveSessionCache } from './lib/storage';
+import { initialDiagnosticSteps, setDiagnosticStep, type DiagnosticStep } from './lib/connectionDiagnostics';
+import { EMPTY_RUNTIME_CATALOG, type RuntimeCatalog, type RuntimeSelection } from './lib/runtimeOptions';
+import { clearRememberedToken, loadConnectionProfiles, loadLastSessionId, loadLoginHint, loadRememberedToken, loadRuntimeSelection, loadServerUrl, loadSessionCache, saveConnectionProfile, saveLastSessionId, saveLoginHint, saveRememberedToken, saveRuntimeSelection, saveServerUrl, saveSessionCache, type ConnectionProfile } from './lib/storage';
 
 type Client = HermesApiClient | MockHermesClient;
 type Screen = 'connect' | 'sessions' | 'chat';
@@ -66,6 +68,10 @@ export function App() {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [chatStatus, setChatStatus] = useState<'disconnected' | 'connecting' | 'ready' | 'running' | 'error'>('disconnected');
   const [banner, setBanner] = useState('');
+  const [diagnosticSteps, setDiagnosticSteps] = useState<DiagnosticStep[]>(() => initialDiagnosticSteps());
+  const [connectionProfiles, setConnectionProfiles] = useState<ConnectionProfile[]>(() => loadConnectionProfiles());
+  const [runtimeCatalog, setRuntimeCatalog] = useState<RuntimeCatalog>(EMPTY_RUNTIME_CATALOG);
+  const [runtimeSelection, setRuntimeSelection] = useState<RuntimeSelection>({});
   const gatewayRef = useRef<GatewayHandle | null>(null);
   const liveSessionIdRef = useRef<string>('');
   const historySessionRef = useRef<HermesSession | null>(null);
@@ -181,30 +187,43 @@ export function App() {
       const status = await mock.status();
       setClient(mock);
       setAuth({ mode: 'token', token: 'mock' });
+      setDiagnosticSteps([
+        { id: 'url', state: 'passed', message: 'Mock mode selected.' },
+        { id: 'status', state: 'passed', message: 'Mock dashboard ready.' },
+        { id: 'auth', state: 'skipped', message: 'Mock mode does not use real auth.' },
+        { id: 'login', state: 'skipped', message: 'Mock mode does not store credentials.' },
+        { id: 'gateway', state: 'skipped', message: 'Mock mode simulates streaming.' },
+      ]);
+      setRuntimeCatalog(await mock.runtimeCatalog());
       setConnection((state) => ({ ...state, status: 'ready', version: status.version, message: 'Mock mode ready. No network calls will be made.' }));
       return;
     }
     const normalized = normalizeServerUrl(connection.rawUrl);
     if (!normalized) {
+      setDiagnosticSteps(setDiagnosticStep(initialDiagnosticSteps(), 'url', { state: 'failed', message: 'Enter an http:// or https:// URL.' }));
       setConnection((state) => ({ ...state, status: 'error', message: 'Use an http:// or https:// Hermes dashboard URL.' }));
       return;
     }
     setConnection((state) => ({ ...state, status: 'checking', message: 'Checking Hermes dashboard…' }));
     try {
       const api = new HermesApiClient(normalized);
-      const status = await api.status();
-      const providers = await api.authProviders();
-      const capability = api.capability(status, providers);
+      const result = await api.diagnoseConnection({ mode: connection.mode, username: connection.username, password: connection.password, token: connection.token });
+      setDiagnosticSteps(result.steps);
+      if (!result.ok) throw new Error(result.steps.find((step) => step.state === 'failed')?.message ?? 'Could not reach Hermes.');
       saveServerUrl(normalized);
+      const saved = saveConnectionProfile({ name: '', url: normalized, mode: connection.mode, username: connection.username });
+      setConnectionProfiles([saved, ...loadConnectionProfiles().filter((profile) => profile.id !== saved.id)]);
+      const runtime = loadRuntimeSelection(normalized);
+      setRuntimeSelection(runtime);
       setClient(api);
       setConnection((state) => ({
         ...state,
         rawUrl: normalized,
         status: 'ready',
-        version: status.version,
-        capability,
-        mode: capability.kind === 'passwordAvailable' ? 'password' : 'token',
-        message: status.auth_required ? 'Password auth is available. Sign in to continue.' : 'Token mode is available. Use a trusted private network only.',
+        version: result.version,
+        capability: result.capability,
+        mode: result.capability?.kind === 'passwordAvailable' ? 'password' : 'token',
+        message: result.capability?.kind === 'passwordAvailable' ? 'Password auth is available. Sign in to continue.' : 'Token mode is available. Use a trusted private network only.',
       }));
     } catch (error) {
       setConnection((state) => ({ ...state, status: 'error', message: error instanceof Error ? error.message : 'Could not reach Hermes.' }));
@@ -225,6 +244,7 @@ export function App() {
         saveSessionCache(loaded.sessions);
         setSessionPage({ total: loaded.total, limit: loaded.limit, offset: loaded.offset });
         saveLoginHint({ mode: 'mock' });
+        setRuntimeCatalog(await activeClient.runtimeCatalog());
         setConnection((state) => ({ ...state, status: 'ready', message: 'Mock mode connected. No real Hermes server was contacted.' }));
         setScreen('sessions');
         return;
@@ -246,6 +266,13 @@ export function App() {
         saveLoginHint({ mode: 'token', username: connection.username });
       }
       const loaded = await loadSessionPage(activeClient, session, 0);
+      if ('runtimeCatalog' in activeClient) {
+        const catalog = await activeClient.runtimeCatalog(session).catch(() => EMPTY_RUNTIME_CATALOG);
+        setRuntimeCatalog(catalog);
+      }
+      saveConnectionProfile({ name: '', url: normalized, mode: connection.mode, username: connection.username });
+      setConnectionProfiles(loadConnectionProfiles());
+      saveRuntimeSelection(normalized, runtimeSelection);
       setClient(activeClient);
       setAuth(session);
       setSessions(loaded.sessions);
@@ -431,6 +458,27 @@ export function App() {
             <div className="hero-orb"><Bot size={44} /></div>
             <h2>Your agent, pocket-sized.</h2>
             <p>Connect to a private Hermes dashboard and drive real sessions from a phone-friendly UI.</p>
+            <div className="onboarding-panel">
+              <strong>Choose how to connect</strong>
+              <div className="onboarding-options">
+                <span>Mock demo</span>
+                <span>Private dashboard</span>
+                <span>Custom proxy</span>
+              </div>
+              <small>Use the same-origin <code>/hermes</code> proxy on Tailnet when possible. Hermex-style native clients may expect different API routes.</small>
+            </div>
+            {connectionProfiles.length > 0 && (
+              <label>
+                <span>Saved server</span>
+                <select value="" onChange={(event) => {
+                  const profile = connectionProfiles.find((item) => item.id === event.target.value);
+                  if (profile) setConnection((state) => ({ ...state, rawUrl: profile.url, mode: profile.mode, username: profile.username ?? state.username, password: '', status: 'idle', message: `Loaded ${profile.name}. Password was not stored.` }));
+                }}>
+                  <option value="">Choose a saved server…</option>
+                  {connectionProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                </select>
+              </label>
+            )}
             <form onSubmit={connect} className="stack">
               <label>
                 <span>Mode</span>
@@ -449,6 +497,7 @@ export function App() {
               </div>
             </form>
             <InfoBanner status={connection.status} message={connection.message} />
+            <DiagnosticList steps={diagnosticSteps} />
             <div className="security-note"><ShieldCheck size={16} /> Passwords are never persisted. Use Tailscale/VPN; do not expose Hermes publicly.</div>
           </section>
         )}
@@ -476,6 +525,10 @@ export function App() {
               <div ref={messagesEndRef} />
             </div>
             <form ref={composerRef} className="composer" onSubmit={submitPrompt}>
+              <RuntimeControls catalog={runtimeCatalog} selection={runtimeSelection} onChange={(next) => {
+                setRuntimeSelection(next);
+                if (connection.rawUrl) saveRuntimeSelection(normalizeServerUrl(connection.rawUrl) ?? connection.rawUrl, next);
+              }} />
               {attachments.length > 0 && <div className="attachment-tray">{attachments.map((file, index) => <span className="attachment-chip" key={`${file.name}-${file.size}-${index}`}>📎 {file.name}<button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={13} /></button></span>)}</div>}
               <button type="button" className="attach" aria-label="Attach file or screenshot" onClick={() => fileInputRef.current?.click()}><Paperclip size={20} /></button>
               <input ref={fileInputRef} className="file-input" type="file" multiple accept="image/*,application/pdf,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx" onChange={(event) => onFilesSelected(event.target.files)} />
@@ -522,6 +575,36 @@ function isToolArtifactText(text: string): boolean {
   if (/["'](output|exit_code|stderr|stdout|success|method|params|session_id|tool_call_id|function|arguments|content_base64)["']\s*:/i.test(trimmed)) return true;
   if (/```(?:json|text)?[\s\S]*?["'](method|params|session_id|output|exit_code|tool_call_id)["']\s*:/i.test(trimmed)) return true;
   return false;
+}
+
+function DiagnosticList({ steps }: { steps: DiagnosticStep[] }) {
+  return <div className="diagnostic-list" aria-label="Connection diagnostics">
+    {steps.map((step) => <div key={step.id} className={`diagnostic-step ${step.state}`}>
+      <span>{step.state === 'passed' ? '✓' : step.state === 'failed' ? '!' : step.state === 'running' ? '…' : '·'}</span>
+      <div><strong>{connectionStepName(step.id)}</strong><small>{step.message}{step.detail ? ` ${step.detail}` : ''}</small></div>
+    </div>)}
+  </div>;
+}
+
+function RuntimeControls({ catalog, selection, onChange }: { catalog: RuntimeCatalog; selection: RuntimeSelection; onChange: (next: RuntimeSelection) => void }) {
+  const profiles = catalog.profiles.length ? catalog.profiles : [{ id: 'default', label: 'default' }];
+  const projects = catalog.projects.length ? catalog.projects : [{ id: '', label: 'No project' }];
+  const models = catalog.models.length ? catalog.models : [{ id: '', label: 'Backend default' }];
+  return <div className="runtime-controls" aria-label="Runtime controls">
+    <label><span>Profile</span><select aria-label="Profile" value={selection.profile ?? profiles[0]?.id ?? ''} onChange={(event) => onChange({ ...selection, profile: event.target.value || undefined })}>{profiles.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+    <label><span>Project</span><select aria-label="Project" value={selection.projectId ?? ''} onChange={(event) => onChange({ ...selection, projectId: event.target.value || undefined })}>{projects.map((option) => <option key={option.id || 'none'} value={option.id}>{option.label}</option>)}</select></label>
+    <label><span>Model</span><select aria-label="Model" value={selection.model ?? ''} onChange={(event) => onChange({ ...selection, model: event.target.value || undefined })}>{models.map((option) => <option key={option.id || 'default'} value={option.id}>{option.label}</option>)}</select></label>
+  </div>;
+}
+
+function connectionStepName(id: DiagnosticStep['id']): string {
+  return {
+    url: 'Server URL',
+    status: 'Dashboard status',
+    auth: 'Authentication',
+    login: 'Login/session',
+    gateway: 'Live gateway',
+  }[id];
 }
 
 function StatusPill({ status }: { status: string }) {

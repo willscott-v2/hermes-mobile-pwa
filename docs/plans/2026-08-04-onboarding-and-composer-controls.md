@@ -1360,7 +1360,7 @@ Hermex inspired the priorities, but direct compatibility failed because it targe
 Run from the canonical public clone:
 
 ```bash
-cd /Users/bob/clawd/projects/hermes-mobile-pwa-public
+cd hermes-mobile-pwa
 npm run typecheck \
   && npm test \
   && npm run build \
