@@ -52,6 +52,13 @@ npm run test:e2e
 npm run qa:mobile
 ```
 
+## Published repository
+
+- URL: https://github.com/willscott-v2/hermes-mobile-pwa
+- Visibility: public
+- Public root commit: `5cc12f0673efdff50fb943f2e389b5cda0105cb3`
+- Published with fresh git history; private local history was not pushed.
+
 ## Recommended GitHub publish flow
 
 Create the public repository from a fresh export of the sanitized working tree, not this `.git` directory/history. Example:
