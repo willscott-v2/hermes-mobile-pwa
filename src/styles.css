@@ -14,8 +14,8 @@
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
 body { overflow: hidden; }
-button, input, select, textarea { font: inherit; }
-button { cursor: pointer; }
+button { font: inherit; cursor: pointer; }
+input, select, textarea { font: inherit; font-size: max(16px, 1rem); }
 .app-shell {
   height: var(--visual-viewport-height, 100dvh);
   min-height: var(--visual-viewport-height, 100dvh);
