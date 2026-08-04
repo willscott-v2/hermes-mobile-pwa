@@ -1,10 +1,17 @@
 {
   "name": "hermes-mobile-pwa",
   "version": "0.1.0",
-  "private": true,
-  "description": "Mobile-first PWA companion for self-hosted Hermes Agent.",
+  "description": "Mobile-first PWA companion for self-hosted Hermes Agent dashboards.",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/willscott-v2/hermes-mobile-pwa#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/willscott-v2/hermes-mobile-pwa.git"
+  },
+  "bugs": {
+    "url": "https://github.com/willscott-v2/hermes-mobile-pwa/issues"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",

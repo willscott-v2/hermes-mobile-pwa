@@ -1,0 +1,60 @@
+---
+name: Bug report
+description: Report a reproducible Hermes Mobile PWA bug
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please do not include private Hermes URLs, session IDs, transcripts, screenshots with personal data, tokens, or passwords.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open the app in Mock mode
+        2. Tap ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Mock
+        - Password auth
+        - Token auth
+        - Unsure
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser/device
+      placeholder: iPhone Safari PWA, Android Chrome, desktop Chrome, etc.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Public-safe logs or screenshots
+      description: Redact private URLs, session IDs, and credentials before attaching.

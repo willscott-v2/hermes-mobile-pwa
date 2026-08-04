@@ -1,0 +1,43 @@
+---
+name: Feature request
+description: Suggest an improvement for Hermes Mobile PWA
+title: "Feature: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the mobile workflow you want to improve. Do not include private session data or credentials.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do from your phone?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the app do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Connection/auth
+        - Sessions/history
+        - Chat/composer
+        - Attachments
+        - Transcript rendering
+        - PWA/install/offline
+        - Deployment/docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
