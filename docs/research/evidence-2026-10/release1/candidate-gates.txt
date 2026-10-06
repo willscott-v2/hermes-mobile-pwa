@@ -1,0 +1,37 @@
+== candidate gates Tue Oct  6 13:15:55 CDT 2026
+== qa:mobile (candidate preview 127.0.0.1:4180)
+
+> hermes-mobile-pwa@0.1.0 qa:mobile
+> node scripts/mobile-ux-qa.mjs
+
+connect {"viewport":{"innerWidth":390,"innerHeight":664,"visualHeight":664,"visualOffsetTop":0},"horizontalOverflow":0,"shell":{"top":0,"right":390,"bottom":664,"left":0,"width":390,"height":664},"main":{"top":67,"right":390,"bottom":664,"left":0,"width":390,"height":597},"messages":null,"composer":null,"lastMessage":null,"sessionList":null,"connect":{"clientHeight":565,"scrollHeight":565,"scrollTop":0},"attention":null,"rawToolVisible":false,"attachVisible":false}
+sessions {"viewport":{"innerWidth":390,"innerHeight":664,"visualHeight":664,"visualOffsetTop":0},"horizontalOverflow":0,"shell":{"top":0,"right":390,"bottom":664,"left":0,"width":390,"height":664},"main":{"top":67,"right":390,"bottom":664,"left":0,"width":390,"height":597},"messages":null,"composer":null,"lastMessage":null,"sessionList":{"clientHeight":393,"scrollHeight":1134,"scrollTop":0},"connect":null,"attention":null,"rawToolVisible":false,"attachVisible":false}
+file://<home>/clawd/projects/hermes-mobile-pwa/scripts/mobile-ux-qa.mjs:80
+if (!(await page.getByRole('button', { name: 'Yes', exact: true }).isVisible())) throw new Error('clarify-attention-card: restored answer action is not visible');
+                                                                                       ^
+
+Error: clarify-attention-card: restored answer action is not visible
+    at file://<home>/clawd/projects/hermes-mobile-pwa/scripts/mobile-ux-qa.mjs:80:88
+
+Node.js v24.20.0
+== scan:secrets
+docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md: private Tailnet hostname
+docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md: local user path
+docs/plans/2026-10-mobile-pwa-elegance-plan.md: private Tailnet hostname
+docs/plans/2026-10-mobile-pwa-elegance-plan.md: local user path
+docs/research/current-pwa-experience-audit-2026-10.md: private Tailnet hostname
+docs/research/evidence-2026-10/live-offline-observations.json: private Tailnet hostname
+docs/research/evidence-2026-10/release1/baseline-gates.txt: private Tailnet hostname
+docs/research/evidence-2026-10/release1/baseline-gates.txt: local user path
+docs/research/evidence-2026-10/release1/candidate-gates.txt: local user path
+docs/research/evidence-2026-10/verification-final.txt: private Tailnet hostname
+docs/research/evidence-2026-10/verification-recheck.txt: private Tailnet hostname
+docs/research/evidence-2026-10/verification-recheck.txt: local user path
+scan_exit=1
+== git diff --check
+DIFFCHECK_OK
+== check:daily (live, unchanged)
+  "ok": true,
+  "liveWebSocket": "skipped",
+  "overall": "ok",
+  "failures": [],

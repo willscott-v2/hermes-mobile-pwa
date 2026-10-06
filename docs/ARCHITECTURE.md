@@ -30,4 +30,12 @@ Same-origin deployment is easiest. Cross-origin browser clients depend on Hermes
 
 ## Service worker
 
-The service worker caches static app-shell assets only. It bypasses `/api/`, `/auth/`, and non-GET requests so private chat/session data is never stored in Cache Storage.
+No service worker is active. `src/registerServiceWorker.ts` deliberately unregisters any prior worker and deletes caches to avoid stale builds; `public/sw.js` is retained but dormant. A versioned static-only offline shell is a later project (see the elegance plan, E6). Nothing from `/hermes`, `/api/`, `/auth/`, or the WebSocket is ever cached.
+
+## Release 1 client state (read and continue)
+
+- `src/lib/connectionState.ts` — pure mapping from connection facts (reachable, authenticated, socket, resumed, running, attention) to the header label; `chatReady` is true only when resumed, socket open, idle, and no attention.
+- `src/lib/history.ts` — pure history reducer: initial / older (prepend, dedupe by durable row id) / refresh (replace the overlapping tail, keep older pages); results carrying a different `baseUrl|profile|sessionId` scope key are discarded.
+- `src/lib/attentionState.ts` — one request per session: waiting → submitting → sent-unconfirmed → resolved/cancelled, reconciled from `request.cancel` / `*.expire` / message events and from `session.resume` open requests.
+- `src/lib/storage.ts` — schema v2: a scoped Continue reference only; legacy global session cache and last-session keys are removed on first load; `forgetThisDevice()` removes only `hermes-mobile-pwa.*` keys.
+- `src/lib/hermesApi.ts` — `sessionHistoryPage` (backward paging), structured `ResumeResult` (`running`, open request keys), `queuePrompt` / `steerSession` built on verified gateway methods, `HttpError` with status for auth/not-found classification. The installed-protocol inventory is in `docs/research/evidence-2026-10/release1/installed-protocol-inventory.md`.

@@ -1,27 +1,21 @@
 import type { AuthMode, HermesSession } from './hermesApi';
-import type { RuntimeSelection } from './runtimeOptions';
 
 const TOKEN_KEY = 'hermes-mobile-pwa.token';
 const SERVER_KEY = 'hermes-mobile-pwa.server-url';
-const LAST_SESSION_KEY = 'hermes-mobile-pwa.last-session-id';
 const LOGIN_HINT_KEY = 'hermes-mobile-pwa.login-hint';
 const SESSION_CACHE_KEY = 'hermes-mobile-pwa.sessions-cache.v1';
-const CONNECTION_PROFILES_KEY = 'hermes-mobile-pwa.connection-profiles.v1';
-const RUNTIME_SELECTION_KEY = 'hermes-mobile-pwa.runtime-selection.v1';
-const SESSION_CACHE_MAX = 150;
+
+export const STORAGE_SCHEMA_VERSION = 2;
+const CONTINUE_KEY = 'hermes-mobile-pwa.continue.v2';
+const SCHEMA_KEY = 'hermes-mobile-pwa.schema-version';
+const LEGACY_KEYS = ['hermes-mobile-pwa.sessions-cache.v1', 'hermes-mobile-pwa.last-session-id'];
+
+export interface StorageScope { origin: string; basePath: string; profile?: string }
+export interface ContinueReference { sessionId: string; title?: string; savedAt: string }
 
 export interface LoginHint {
   username?: string;
   mode?: AuthMode;
-}
-
-export interface ConnectionProfile {
-  id: string;
-  name: string;
-  url: string;
-  mode: AuthMode;
-  username?: string;
-  lastUsedAt?: string;
 }
 
 export function loadServerUrl(): string {
@@ -66,79 +60,122 @@ export function clearRememberedToken(): void {
 }
 
 export function loadLastSessionId(): string {
-  return window.localStorage.getItem(LAST_SESSION_KEY) ?? '';
+  // The legacy global last-session key is retired; continue references are
+  // host/base-path/profile-scoped instead.
+  return '';
 }
 
 export function saveLastSessionId(sessionId: string): void {
-  if (sessionId.trim()) window.localStorage.setItem(LAST_SESSION_KEY, sessionId.trim());
+  // No-op: the legacy global key is retired.
+  void sessionId;
+}
+
+export function scopeFromServerUrl(serverUrl: string, profile?: string): StorageScope | null {
+  let url: URL;
+  try {
+    url = new URL(serverUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.origin === 'mock') return null;
+  const rawPath = url.pathname.length > 1 ? url.pathname : '';
+  const basePath = rawPath.replace(/\/+$/, '');
+  return { origin: url.origin, basePath, profile };
+}
+
+export function migrateLegacyStorage(): { removed: string[] } {
+  const stored = window.localStorage.getItem(SCHEMA_KEY);
+  if (stored === String(STORAGE_SCHEMA_VERSION)) {
+    return { removed: [] };
+  }
+  const removed: string[] = [];
+  for (const key of LEGACY_KEYS) {
+    if (window.localStorage.getItem(key) !== null) {
+      window.localStorage.removeItem(key);
+      removed.push(key);
+    }
+  }
+  window.localStorage.setItem(SCHEMA_KEY, String(STORAGE_SCHEMA_VERSION));
+  return { removed };
+}
+
+export function saveContinueReference(scope: StorageScope, ref: { sessionId: string; title?: string }): void {
+  const sessionId = ref.sessionId?.trim();
+  if (!sessionId || sessionId.startsWith('new-')) return;
+  if (!scope.origin.startsWith('http://') && !scope.origin.startsWith('https://')) return;
+
+  const trimmed = ref.title?.trim();
+  const entry = {
+    v: STORAGE_SCHEMA_VERSION,
+    scope: { origin: scope.origin, basePath: scope.basePath, profile: scope.profile },
+    sessionId,
+    savedAt: new Date().toISOString(),
+    ...(trimmed ? { title: trimmed.slice(0, 80) } : {}),
+  };
+  window.localStorage.setItem(CONTINUE_KEY, JSON.stringify(entry));
+}
+
+export function loadContinueReference(scope: StorageScope): ContinueReference | null {
+  const raw = window.localStorage.getItem(CONTINUE_KEY);
+  if (!raw) return null;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    window.localStorage.removeItem(CONTINUE_KEY);
+    return null;
+  }
+
+  if (parsed?.v !== STORAGE_SCHEMA_VERSION) return null;
+  const stored = parsed.scope;
+  const sessionId = parsed.sessionId;
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  if (!stored || typeof stored.origin !== 'string') return null;
+  if (stored.origin !== scope.origin) return null;
+  if ((stored.basePath ?? '') !== (scope.basePath ?? '')) return null;
+  if ((stored.profile ?? '') !== (scope.profile ?? '')) return null;
+  return {
+    sessionId,
+    title: typeof parsed.title === 'string' ? parsed.title : undefined,
+    savedAt: parsed.savedAt,
+  };
+}
+
+export function clearContinueReference(): void {
+  window.localStorage.removeItem(CONTINUE_KEY);
 }
 
 export function loadSessionCache(): HermesSession[] {
-  try {
-    const raw = window.localStorage.getItem(SESSION_CACHE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { sessions?: HermesSession[] };
-    return Array.isArray(parsed.sessions) ? parsed.sessions.filter((session) => typeof session.id === 'string' && session.id) : [];
-  } catch {
-    return [];
-  }
+  // Private previews are no longer persisted; continue references are scoped.
+  return [];
 }
 
 export function saveSessionCache(sessions: HermesSession[]): void {
-  const deduped = sessions.filter((session, index) => session.id && sessions.findIndex((seen) => seen.id === session.id) === index).slice(0, SESSION_CACHE_MAX);
-  window.localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify({ savedAt: new Date().toISOString(), sessions: deduped }));
+  // No-op, but retire the legacy key so stale previews don't linger.
+  void sessions;
+  window.localStorage.removeItem(SESSION_CACHE_KEY);
 }
 
-export function loadConnectionProfiles(): ConnectionProfile[] {
-  try {
-    const raw = window.localStorage.getItem(CONNECTION_PROFILES_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { profiles?: ConnectionProfile[] };
-    return Array.isArray(parsed.profiles) ? parsed.profiles.filter((profile) => profile.id && profile.url) : [];
-  } catch {
-    return [];
+export function forgetThisDevice(): string[] {
+  const keys = [CONTINUE_KEY, SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS];
+  const removed: string[] = [];
+  for (const key of keys) {
+    if (window.localStorage.getItem(key) !== null) {
+      window.localStorage.removeItem(key);
+      removed.push(key);
+    }
   }
+  return removed;
 }
 
-export function saveConnectionProfile(input: Omit<ConnectionProfile, 'id' | 'lastUsedAt'> & { id?: string; password?: string; token?: string }): ConnectionProfile {
-  const profiles = loadConnectionProfiles();
-  const id = input.id || (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `profile-${Date.now()}`);
-  let fallbackName = input.url;
-  try { fallbackName = new URL(input.url).hostname; } catch {}
-  const profile: ConnectionProfile = {
-    id,
-    name: input.name.trim() || fallbackName,
-    url: input.url,
-    mode: input.mode,
-    username: input.username?.trim() || undefined,
-    lastUsedAt: new Date().toISOString(),
-  };
-  const next = [profile, ...profiles.filter((seen) => seen.id !== id && seen.url !== profile.url)].slice(0, 8);
-  window.localStorage.setItem(CONNECTION_PROFILES_KEY, JSON.stringify({ profiles: next }));
-  return profile;
-}
-
-export function deleteConnectionProfile(id: string): void {
-  const next = loadConnectionProfiles().filter((profile) => profile.id !== id);
-  window.localStorage.setItem(CONNECTION_PROFILES_KEY, JSON.stringify({ profiles: next }));
-}
-
-export function loadRuntimeSelection(serverUrl: string): RuntimeSelection {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(RUNTIME_SELECTION_KEY) ?? '{}') as Record<string, RuntimeSelection>;
-    return parsed[serverUrl] ?? {};
-  } catch {
-    return {};
+export function appStorageKeys(): string[] {
+  const keys: string[] = [];
+  const ls = window.localStorage;
+  for (let i = 0; i < ls.length; i++) {
+    const key = ls.key(i);
+    if (key && key.startsWith('hermes-mobile-pwa.')) keys.push(key);
   }
-}
-
-export function saveRuntimeSelection(serverUrl: string, selection: RuntimeSelection): void {
-  let parsed: Record<string, RuntimeSelection> = {};
-  try {
-    parsed = JSON.parse(window.localStorage.getItem(RUNTIME_SELECTION_KEY) ?? '{}') as Record<string, RuntimeSelection>;
-  } catch {
-    parsed = {};
-  }
-  parsed[serverUrl] = selection;
-  window.localStorage.setItem(RUNTIME_SELECTION_KEY, JSON.stringify(parsed));
+  return keys;
 }

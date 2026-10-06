@@ -1,6 +1,4 @@
-import { asRecord, JsonRpcEvent, JsonRpcPeer, JsonValue, parseJsonRpcMessage } from './jsonRpc';
-import { connectionIssueHint, initialDiagnosticSteps, setDiagnosticStep, type ConnectionIssueCode, type DiagnosticStep } from './connectionDiagnostics';
-import { normalizeRuntimeCatalog, type RuntimeCatalog } from './runtimeOptions';
+import { asRecord, JsonRpcError, JsonRpcEvent, JsonRpcPeer, JsonValue, parseJsonRpcMessage } from './jsonRpc';
 
 export type AuthMode = 'password' | 'token' | 'mock';
 
@@ -17,12 +15,26 @@ export interface ServerStatus {
   active_sessions?: number;
   auth_required?: boolean;
   auth_providers?: string[];
+  profiles?: string[];
 }
 
 export interface AuthProvider {
   name: string;
   display_name?: string;
   supports_password?: boolean;
+}
+
+interface ModelOptionsProvider {
+  name?: string;
+  slug?: string;
+  models?: string[];
+  authenticated?: boolean;
+}
+
+interface ModelOptionsResponse {
+  provider?: string;
+  model?: string;
+  providers?: ModelOptionsProvider[];
 }
 
 export type AuthCapability =
@@ -61,18 +73,95 @@ export interface ChatMessage {
   meta?: string;
 }
 
+export interface HistoryPage {
+  sessionId: string;
+  profile?: string;
+  messages: ChatMessage[];
+  limit: number;
+  offset: number;
+  returned: number;
+  reachedBeginning: boolean;
+}
+
+export interface AttentionRequest {
+  kind: 'approval' | 'clarify' | 'sudo' | 'secret';
+  requestId?: string;
+  serverRequestId?: string;
+  questionId?: string;
+  title: string;
+  detail: string;
+  choices?: string[];
+  multiSelect?: boolean;
+  freeText?: boolean;
+}
+
 export interface AttachmentResult {
   name: string;
   text: string;
   kind: 'image' | 'pdf' | 'file';
 }
 
+export interface RuntimeModelOption {
+  provider: string;
+  model: string;
+  label: string;
+}
+
+export interface RuntimeOptions {
+  profiles: string[];
+  currentProfile: string;
+  models: RuntimeModelOption[];
+  currentModel?: RuntimeModelOption;
+}
+
+export interface RuntimeSelection {
+  profile?: string;
+  provider?: string;
+  model?: string;
+  reasoning_effort?: string;
+}
+
+export interface ResumeResult {
+  sessionId: string;        // live gateway id for prompt.submit / steer / queue
+  storedId: string;         // durable session key (`session_key` / `resumed`) for history and references
+  running: boolean;         // gateway-reported turn state at resume time
+  status?: string;
+  openRequestKeys: string[]; // keys (request_id / server request id) of requests still open
+}
+
+export interface CreatedSession {
+  liveId: string;    // gateway handle for prompt.submit / steer / queue
+  storedId: string;  // durable session key the REST API and Continue reference use
+}
+
 export interface GatewayHandle {
-  createSession(profile?: string): Promise<string>;
-  resumeSession(sessionId: string, profile?: string): Promise<string>;
+  createSession(selection?: RuntimeSelection): Promise<CreatedSession>;
+  resumeSession(sessionId: string, profile?: string): Promise<ResumeResult>;
   attachFile(sessionId: string, file: File): Promise<AttachmentResult>;
   submitPrompt(sessionId: string, prompt: string): Promise<void>;
+  queuePrompt(sessionId: string, text: string): Promise<QueueOutcome>;
+  steerSession(sessionId: string, text: string, profile?: string): Promise<SteerOutcome>;
+  respondApproval(sessionId: string, requestId: string, choice: 'once' | 'deny'): Promise<void>;
+  respondClarify(sessionId: string, requestId: string, answer: string, questionId?: string): Promise<void>;
+  respondServerRequest(requestId: string, result: Record<string, JsonValue>): void;
+  declineServerRequest(requestId: string): void; // "not shown on this surface" (4404): fail-closed hand-back
+  serverRequestMethods: string[];                // advertised by client.capabilities; empty when the gateway predates it
   close(): void;
+}
+
+// Mirrors tui_gateway/server_requests.py NOT_SHOWN_CODE: an answering client that cannot show a
+// request declines it so the gateway does not stall the agent waiting for this surface.
+export const SERVER_REQUEST_NOT_SHOWN_CODE = 4404;
+
+export function shouldDeclineOnPhone(request: AttentionRequest): boolean {
+  if (!request.serverRequestId) return false;
+  if (request.kind === 'sudo' || request.kind === 'secret') return true;
+  if (request.kind === 'clarify') return request.multiSelect === true || !request.questionId || (!request.choices?.length && request.freeText !== true);
+  if (request.kind === 'approval') {
+    const { approveOnce, deny } = approvalActionAvailability(request);
+    return !approveOnce && !deny;
+  }
+  return false;
 }
 
 export interface GatewayCallbacks {
@@ -80,21 +169,6 @@ export interface GatewayCallbacks {
   onOpen?: () => void;
   onClose?: () => void;
   onError?: (error: Error) => void;
-}
-
-export interface ConnectionDiagnosticInput {
-  mode: AuthMode;
-  username?: string;
-  password?: string;
-  token?: string;
-}
-
-export interface ConnectionDiagnosticResult {
-  ok: boolean;
-  normalizedUrl: string;
-  capability?: AuthCapability;
-  version?: string;
-  steps: DiagnosticStep[];
 }
 
 export function normalizeServerUrl(input: string): string | null {
@@ -134,88 +208,37 @@ export function redactForLog(value: string): string {
     .replace(/(password|token|secret)(["'\s:=]+)([^"'\s,}]+)/gi, '$1$2[redacted]');
 }
 
-function failedDiagnostic(baseUrl: string, steps: DiagnosticStep[], id: DiagnosticStep['id'], issue: ConnectionIssueCode, detail?: string): ConnectionDiagnosticResult {
-  return {
-    ok: false,
-    normalizedUrl: baseUrl,
-    steps: setDiagnosticStep(steps, id, { state: 'failed', issue, message: connectionIssueHint(issue), detail: detail ? redactForLog(detail) : undefined }),
-  };
+function authHeaders(auth?: AuthSession): HeadersInit {
+  return auth?.mode === 'token' && auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
 }
 
-async function optionalGet<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
+export class HttpError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'HttpError';
   }
 }
 
-function authHeaders(auth?: AuthSession): HeadersInit {
-  return auth?.mode === 'token' && auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
+export function isAuthError(error: unknown): boolean {
+  return error instanceof HttpError && (error.status === 401 || error.status === 403);
+}
+
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof HttpError && error.status === 404;
 }
 
 async function parseError(response: Response): Promise<Error> {
   const text = await response.text().catch(() => '');
   try {
     const json = JSON.parse(text) as { detail?: string; error?: string };
-    return new Error(json.detail ?? json.error ?? `HTTP ${response.status}`);
+    return new HttpError(json.detail ?? json.error ?? `HTTP ${response.status}`, response.status);
   } catch {
-    return new Error(text.trim() || `HTTP ${response.status}`);
+    return new HttpError(text.trim() || `HTTP ${response.status}`, response.status);
   }
 }
 
 export class HermesApiClient {
   constructor(public readonly baseUrl: string) {}
-
-  async diagnoseConnection(input: ConnectionDiagnosticInput): Promise<ConnectionDiagnosticResult> {
-    let steps = setDiagnosticStep(initialDiagnosticSteps(), 'url', { state: 'passed', message: 'URL parsed.' });
-    let status: ServerStatus;
-    try {
-      steps = setDiagnosticStep(steps, 'status', { state: 'running', message: 'Checking /api/status…' });
-      status = await this.status();
-      steps = setDiagnosticStep(steps, 'status', { state: 'passed', message: status.version ? `Dashboard responded (${status.version}).` : 'Dashboard responded.' });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Status check failed.';
-      return failedDiagnostic(this.baseUrl, steps, 'status', /doctype|<html|root/i.test(message) ? 'wrong-pwa-url' : 'unreachable', message);
-    }
-
-    let capability: AuthCapability;
-    try {
-      steps = setDiagnosticStep(steps, 'auth', { state: 'running', message: 'Checking auth providers…' });
-      const providers = await this.authProviders();
-      capability = this.capability(status, providers);
-      steps = setDiagnosticStep(steps, 'auth', { state: 'passed', message: capability.kind === 'passwordAvailable' ? `Password provider: ${capability.displayName}` : 'Auth capability discovered.' });
-    } catch (error) {
-      return failedDiagnostic(this.baseUrl, steps, 'auth', 'unknown', error instanceof Error ? error.message : undefined);
-    }
-
-    try {
-      if (input.mode === 'password') {
-        if (capability.kind !== 'passwordAvailable') return failedDiagnostic(this.baseUrl, steps, 'auth', 'password-provider-missing');
-        if (!input.password?.trim()) {
-          steps = setDiagnosticStep(steps, 'login', { state: 'skipped', message: 'Password provider found. Enter your password to verify login.' });
-          steps = setDiagnosticStep(steps, 'gateway', { state: 'skipped', message: 'Gateway check runs after password login.' });
-          return { ok: true, normalizedUrl: this.baseUrl, capability, version: status.version, steps };
-        }
-        steps = setDiagnosticStep(steps, 'login', { state: 'running', message: 'Checking password login…' });
-        await this.passwordLogin(capability.provider, input.username ?? '', input.password ?? '');
-        steps = setDiagnosticStep(steps, 'login', { state: 'passed', message: 'Password login accepted. Password was not stored.' });
-        steps = setDiagnosticStep(steps, 'gateway', { state: 'running', message: 'Checking WebSocket ticket…' });
-        await this.mintWsTicket();
-        steps = setDiagnosticStep(steps, 'gateway', { state: 'passed', message: 'Gateway ticket endpoint responded.' });
-      } else if (input.mode === 'token') {
-        steps = setDiagnosticStep(steps, 'login', { state: 'skipped', message: 'Token mode selected; password login skipped.' });
-        steps = setDiagnosticStep(steps, 'gateway', { state: input.token?.trim() ? 'passed' : 'skipped', message: input.token?.trim() ? 'Token supplied for gateway connection.' : 'Gateway check skipped until a token is supplied.' });
-      } else {
-        steps = setDiagnosticStep(steps, 'login', { state: 'skipped', message: 'Mock mode does not use dashboard login.' });
-        steps = setDiagnosticStep(steps, 'gateway', { state: 'skipped', message: 'Mock mode does not use the live gateway.' });
-      }
-      return { ok: true, normalizedUrl: this.baseUrl, capability, version: status.version, steps };
-    } catch (error) {
-      const active = steps.find((step) => step.state === 'running')?.id ?? 'login';
-      return failedDiagnostic(this.baseUrl, steps, active, active === 'gateway' ? 'gateway-unavailable' : 'auth-failed', error instanceof Error ? error.message : undefined);
-    }
-  }
 
   async status(): Promise<ServerStatus> {
     return this.get<ServerStatus>('/api/status');
@@ -230,6 +253,33 @@ export class HermesApiClient {
     }
   }
 
+  async runtimeOptions(auth?: AuthSession): Promise<RuntimeOptions> {
+    const status = await this.status();
+    const profiles = status.profiles?.length ? status.profiles : ['default'];
+    let payload: ModelOptionsResponse | null = null;
+    try {
+      const url = endpointUrl(this.baseUrl, '/api/model/options');
+      url.searchParams.set('include_unconfigured', '0');
+      payload = await this.get<ModelOptionsResponse>(url, auth);
+    } catch {
+      payload = null;
+    }
+    const models = (payload?.providers ?? [])
+      .filter((provider) => provider.authenticated !== false && (provider.slug || provider.name))
+      .flatMap((provider) => {
+        const providerId = String(provider.slug || provider.name);
+        return (provider.models ?? []).map((model) => ({
+          provider: providerId,
+          model,
+          label: `${provider.name || provider.slug}: ${model}`,
+        }));
+      });
+    const currentModel = models.find((item) => item.provider === payload?.provider && item.model === payload?.model)
+      ?? (payload?.provider && payload?.model ? { provider: payload.provider, model: payload.model, label: `${payload.provider}: ${payload.model}` } : undefined)
+      ?? models[0];
+    return { profiles, currentProfile: profiles[0] ?? 'default', models, currentModel };
+  }
+
   capability(status: ServerStatus, providers: AuthProvider[]): AuthCapability {
     if (!status.auth_required) return { kind: 'tokenOnly' };
     const password = providers.find((provider) => provider.supports_password !== false);
@@ -237,19 +287,6 @@ export class HermesApiClient {
       return { kind: 'passwordAvailable', provider: password.name, displayName: password.display_name ?? password.name };
     }
     return { kind: 'oauthOnly', providers: providers.map((provider) => provider.name) };
-  }
-
-  async runtimeCatalog(auth: AuthSession): Promise<RuntimeCatalog> {
-    const [profiles, projects, models] = await Promise.all([
-      optionalGet(() => this.get<{ profiles?: unknown[] } | unknown[]>('/api/profiles', auth), [] as unknown[]),
-      optionalGet(() => this.get<{ projects?: unknown[] } | unknown[]>('/api/projects', auth), [] as unknown[]),
-      optionalGet(() => this.get<{ models?: unknown[] } | unknown[]>('/api/models', auth), [] as unknown[]),
-    ]);
-    return normalizeRuntimeCatalog({
-      profiles: Array.isArray(profiles) ? profiles as never[] : (profiles as { profiles?: never[] }).profiles,
-      projects: Array.isArray(projects) ? projects as never[] : (projects as { projects?: never[] }).projects,
-      models: Array.isArray(models) ? models as never[] : (models as { models?: never[] }).models,
-    });
   }
 
   async passwordLogin(provider: string, username: string, password: string): Promise<AuthSession> {
@@ -310,6 +347,28 @@ export class HermesApiClient {
     return { session: { ...detail, id: responseSessionId }, messages: normalized.slice(-requested) };
   }
 
+  async sessionHistoryPage(auth: AuthSession, session: HermesSession, options: { limit?: number; offset?: number } = {}): Promise<HistoryPage> {
+    const limit = Math.min(Math.max(options.limit ?? 120, 1), 500);
+    const offset = Math.max(options.offset ?? 0, 0);
+    const url = endpointUrl(this.baseUrl, `/api/sessions/${encodeURIComponent(session.id)}/messages`);
+    url.searchParams.set('limit', String(limit));
+    url.searchParams.set('offset', String(offset));
+    url.searchParams.set('order', 'latest');
+    if (session.profile) url.searchParams.set('profile', session.profile);
+    const response = await this.get<{ session_id?: unknown; profile?: unknown; messages?: RawHermesMessage[]; pagination?: { returned?: unknown } }>(url, auth);
+    const rawMessages = response.messages ?? [];
+    const returned = typeof response.pagination?.returned === 'number' ? response.pagination.returned : rawMessages.length;
+    return {
+      sessionId: response.session_id ? String(response.session_id) : session.id,
+      profile: typeof response.profile === 'string' ? response.profile : session.profile,
+      messages: normalizeHistoryMessages(rawMessages),
+      limit,
+      offset,
+      returned,
+      reachedBeginning: returned < limit,
+    };
+  }
+
   async sessionDetail(auth: AuthSession, session: HermesSession): Promise<HermesSession> {
     const url = endpointUrl(this.baseUrl, `/api/sessions/${encodeURIComponent(session.id)}`);
     if (session.profile) url.searchParams.set('profile', session.profile);
@@ -357,14 +416,35 @@ export class HermesApiClient {
       }
     });
     await waitForOpen(socket);
+    // Verified contract: the gateway only delivers approval/clarify/sudo/secret requests to clients
+    // that advertised answering them; without this call every request fails fast as undeliverable.
+    let serverRequestMethods: string[] = [];
+    try {
+      const capabilities = asRecord(await peer.request('client.capabilities', { server_requests: true }, { timeoutMs: 10_000 }));
+      serverRequestMethods = Array.isArray(capabilities.server_requests)
+        ? capabilities.server_requests.filter((item): item is string => typeof item === 'string')
+        : [];
+    } catch {
+      serverRequestMethods = [];
+    }
     return {
-      createSession: async (profile?: string) => {
-        const result = asRecord(await peer.request('session.create', profile ? { profile } : {}));
-        return String(result.session_id ?? result.session_key ?? result.id ?? '');
+      serverRequestMethods,
+      createSession: async (selection?: RuntimeSelection) => {
+        const result = asRecord(await peer.request('session.create', {
+          ...(selection?.profile ? { profile: selection.profile } : {}),
+          ...(selection?.provider ? { provider: selection.provider } : {}),
+          ...(selection?.model ? { model: selection.model } : {}),
+          ...(selection?.reasoning_effort ? { reasoning_effort: selection.reasoning_effort } : {}),
+        }));
+        const liveId = String(result.session_id ?? result.session_key ?? result.id ?? '');
+        const storedId = String(result.stored_session_id ?? result.session_key ?? liveId);
+        return { liveId, storedId };
       },
       resumeSession: async (sessionId: string, profile?: string) => {
         const result = asRecord(await peer.request('session.resume', { session_id: sessionId, ...(profile ? { profile } : {}) }));
-        return String(result.session_id ?? sessionId);
+        const pending = pendingAttentionEvents(result);
+        for (const event of pending) callbacks.onEvent(event);
+        return resumeResultFromPayload(result, sessionId, pending);
       },
       attachFile: async (sessionId: string, file: File) => {
         const dataUrl = await fileToDataUrl(file);
@@ -384,6 +464,28 @@ export class HermesApiClient {
       submitPrompt: async (sessionId: string, prompt: string) => {
         await peer.request('prompt.submit', { session_id: sessionId, text: prompt }, { timeoutMs: 10 * 60_000 });
       },
+      queuePrompt: async (sessionId: string, text: string) => queueOutcomeFromResult(await peer.request('prompt.submit', queuePromptParams(sessionId, text), { timeoutMs: 60_000 })),
+      steerSession: async (sessionId: string, text: string, profile?: string) => {
+        try {
+          return steerOutcomeFromResult(await peer.request('session.steer', steerParams(sessionId, text, profile)));
+        } catch (error) {
+          const outcome = steerOutcomeFromError(error);
+          if (outcome) return outcome;
+          throw error;
+        }
+      },
+      respondApproval: async (sessionId: string, requestId: string, choice: 'once' | 'deny') => {
+        await peer.request('approval.respond', approvalResponseParams(sessionId, requestId, choice));
+      },
+      respondClarify: async (sessionId: string, requestId: string, answer: string, questionId?: string) => {
+        await peer.request('clarify.respond', clarifyResponseParams(sessionId, requestId, answer, questionId));
+      },
+      respondServerRequest: (requestId: string, result: Record<string, JsonValue>) => {
+        peer.respond(requestId, result);
+      },
+      declineServerRequest: (requestId: string) => {
+        peer.respondError(requestId, SERVER_REQUEST_NOT_SHOWN_CODE, 'This request cannot be answered from the phone; use the full dashboard.');
+      },
       close: () => socket.close(1000, 'client closing'),
     };
   }
@@ -396,7 +498,7 @@ export class HermesApiClient {
   }
 }
 
-type RawHermesMessage = { role?: unknown; content?: unknown; text?: unknown; message?: unknown; tool_calls?: unknown; tool_call_id?: unknown; tool_name?: unknown; function_call?: unknown; name?: unknown; created_at?: unknown; timestamp?: unknown; time?: unknown };
+type RawHermesMessage = { id?: unknown; role?: unknown; content?: unknown; text?: unknown; message?: unknown; tool_calls?: unknown; tool_call_id?: unknown; tool_name?: unknown; display_kind?: unknown; display_content?: unknown; session_id?: unknown; function_call?: unknown; name?: unknown; created_at?: unknown; timestamp?: unknown; time?: unknown };
 
 export function normalizeHistoryMessages(rawMessages: RawHermesMessage[]): ChatMessage[] {
   const normalized = rawMessages.map(normalizeMessage).filter((message): message is ChatMessage => Boolean(message));
@@ -435,15 +537,25 @@ function isToolArtifactText(text: string): boolean {
 }
 
 function normalizeMessage(raw: RawHermesMessage, index: number): ChatMessage | null {
+  if (raw.display_kind === 'hidden') return null;
+  const stableId = stableHistoryId(raw.id);
   if (hasToolPayload(raw)) {
     const meta = stringifyMessageText(raw.name) || 'tool activity';
-    return { id: `history-${index}-tool`, role: 'tool', text: meta, state: 'complete', meta };
+    return { id: stableId ?? `history-${index}-tool`, role: 'tool', text: meta, state: 'complete', meta };
   }
+  const displayContent = raw.display_content;
+  const rawText = typeof displayContent === 'string' && displayContent.length > 0 ? displayContent : raw.content ?? raw.text ?? raw.message;
   const role = normalizeRole(raw.role);
-  const text = stringifyMessageText(raw.content ?? raw.text ?? raw.message);
+  const text = stringifyMessageText(rawText);
   if (!text.trim()) return null;
   const meta = timestampToIso(raw.created_at ?? raw.timestamp ?? raw.time);
-  return { id: `history-${index}-${role}`, role, text, state: 'complete', meta: meta ? relativeAbsolute(meta) : undefined };
+  return { id: stableId ?? `history-${index}-${role}`, role, text, state: 'complete', meta: meta ? relativeAbsolute(meta) : undefined };
+}
+
+function stableHistoryId(rawId: unknown): string | null {
+  if (typeof rawId === 'number' && Number.isFinite(rawId)) return `history-${rawId}`;
+  if (typeof rawId === 'string' && rawId.trim()) return `history-${rawId}`;
+  return null;
 }
 
 function hasToolPayload(raw: RawHermesMessage): boolean {
@@ -522,11 +634,187 @@ function waitForOpen(socket: WebSocket): Promise<void> {
   });
 }
 
+export function approvalResponseParams(sessionId: string, requestId: string, choice: 'once' | 'deny'): Record<string, JsonValue> {
+  return { session_id: sessionId, request_id: requestId, choice, all: false };
+}
+
+// Verified contract (tui_gateway/contracts/server_requests.py ClarifyResult): the server-request
+// response is `{ answers: { [qid]: answer } }`; a response without `answers` is treated as cancel-all.
+export function clarifyServerRequestResult(questionId: string, answer: string): Record<string, JsonValue> {
+  return { answers: { [questionId]: answer } };
+}
+
+export function clarifyResponseParams(sessionId: string, requestId: string, answer: string, questionId?: string): Record<string, JsonValue> {
+  return { session_id: sessionId, request_id: requestId, ...(questionId ? { question_id: questionId } : {}), answer };
+}
+
+export type QueueOutcome = { status: 'queued' | 'streaming' | 'unknown'; raw?: string };
+export type SteerOutcome = { status: 'accepted' | 'rejected' | 'unsupported' | 'queued-for-next-turn' | 'unknown'; raw?: string };
+
+export function queuePromptParams(sessionId: string, text: string): Record<string, JsonValue> {
+  return { session_id: sessionId, text, queued: true };
+}
+
+export function steerParams(sessionId: string, text: string, profile?: string): Record<string, JsonValue> {
+  return { session_id: sessionId, text, ...(profile ? { profile } : {}) };
+}
+
+export function queueOutcomeFromResult(result: JsonValue): QueueOutcome {
+  const status = String(asRecord(result).status ?? '');
+  if (status === 'queued') return { status: 'queued' };
+  if (status === 'streaming') return { status: 'streaming' };
+  return { status: 'unknown', raw: status };
+}
+
+export function steerOutcomeFromResult(result: JsonValue): SteerOutcome {
+  const status = String(asRecord(result).status ?? '');
+  if (status === 'queued') return { status: 'accepted' };
+  if (status === 'rejected') return { status: 'rejected' };
+  return { status: 'unknown', raw: status };
+}
+
+export function steerOutcomeFromError(error: unknown): SteerOutcome | null {
+  if (error instanceof JsonRpcError && error.code === 4010) return { status: 'unsupported' };
+  return null;
+}
+
+export function approvalActionAvailability(request: AttentionRequest): { approveOnce: boolean; deny: boolean } {
+  const choices = request.kind === 'approval' && (request.requestId || request.serverRequestId) ? request.choices ?? [] : [];
+  return { approveOnce: choices.includes('once'), deny: choices.includes('deny') };
+}
+
+export function updateAttentionFromEvent(current: AttentionRequest | null, event: JsonRpcEvent): AttentionRequest | null {
+  const next = attentionFromEvent(event);
+  if (next) return next;
+  if (!current) return current;
+  const payload = asRecord(event.payload ?? {});
+  if (event.type === 'request.cancel') return payload.id === current.serverRequestId ? null : current;
+  if (!event.type?.endsWith('.expire')) return current;
+  return payload.request_id === current.requestId ? null : current;
+}
+
+export function resumeResultFromPayload(result: Record<string, JsonValue>, requestedId: string, pending: JsonRpcEvent[]): ResumeResult {
+  const keys = pending
+    .map((event) => attentionFromEvent(event))
+    .map((request) => request?.requestId ?? request?.serverRequestId)
+    .filter((key): key is string => typeof key === 'string' && key.length > 0);
+  return {
+    sessionId: String(result.session_id ?? requestedId),
+    storedId: String(result.session_key ?? result.resumed ?? requestedId),
+    running: result.running === true,
+    status: typeof result.status === 'string' ? result.status : undefined,
+    openRequestKeys: keys,
+  };
+}
+
+export function pendingAttentionEvents(result: Record<string, JsonValue>): JsonRpcEvent[] {
+  const events: JsonRpcEvent[] = [];
+  const pendingApproval = asRecord(result.pending_approval ?? {});
+  if (Object.keys(pendingApproval).length) events.push({ type: 'approval.request', payload: pendingApproval });
+  const pendingClarify = asRecord(result.pending_clarify ?? {});
+  if (Object.keys(pendingClarify).length) events.push({ type: 'clarify.request', payload: pendingClarify });
+  const openRequests = Array.isArray(result.open_requests) ? result.open_requests : [];
+  for (const rawRequest of openRequests) {
+    const request = asRecord(rawRequest);
+    const method = typeof request.method === 'string' ? request.method : '';
+    const id = typeof request.id === 'string' ? request.id : '';
+    if (!id || !['approval', 'clarify', 'sudo', 'secret'].includes(method)) continue;
+    events.push({ ...asRecord(request.params ?? {}), type: method, server_request_id: id });
+  }
+  return events;
+}
+
+export function attentionFromEvent(event: JsonRpcEvent): AttentionRequest | null {
+  const type = event.type ?? '';
+  const directKind = ['approval', 'clarify', 'sudo', 'secret'].includes(type) && typeof event.server_request_id === 'string';
+  if (!directKind && !['approval.request', 'clarify.request', 'sudo.request', 'secret.request'].includes(type)) return null;
+  const payload = directKind
+    ? Object.entries(event).reduce<Record<string, JsonValue>>((record, [key, value]) => {
+        if (value !== undefined) record[key] = value;
+        return record;
+      }, {})
+    : asRecord(event.payload ?? {});
+  const requestId = !directKind && typeof payload.request_id === 'string' ? payload.request_id : undefined;
+  const serverRequestId = directKind ? String(event.server_request_id) : undefined;
+  const choices = Array.isArray(payload.choices) ? payload.choices.filter((choice): choice is string => typeof choice === 'string') : undefined;
+  if (type === 'clarify.request' || type === 'clarify') {
+    const question = typeof payload.question === 'string' ? payload.question.trim() : '';
+    const batchAnswers = asRecord(payload.answers ?? {});
+    const batchQuestions = Array.isArray(payload.questions)
+      ? payload.questions.map((item) => asRecord(item)).map((item) => {
+          const text = typeof item.question === 'string' ? item.question.trim() : '';
+          const qid = typeof item.qid === 'string' ? item.qid : '';
+          const answer = qid && typeof batchAnswers[qid] === 'string' ? String(batchAnswers[qid]) : '';
+          const itemChoices = Array.isArray(item.choices)
+            ? item.choices.filter((choice): choice is string => typeof choice === 'string')
+            : [];
+          return {
+            qid,
+            answered: Boolean(answer),
+            choices: itemChoices,
+            multiSelect: item.multi_select === true,
+            detail: text ? `${text}${answer ? ` (answered: ${answer})` : itemChoices.length ? ` (${itemChoices.join(' / ')})` : ''}` : '',
+          };
+        }).filter((item) => item.detail)
+      : [];
+    const unanswered = batchQuestions.filter((item) => !item.answered);
+    const actionableQuestion = unanswered.length === 1 ? unanswered[0] : undefined;
+    return {
+      kind: 'clarify',
+      requestId,
+      serverRequestId,
+      ...(actionableQuestion?.qid ? { questionId: actionableQuestion.qid } : {}),
+      title: unanswered.length > 1 ? `Hermes needs ${unanswered.length} answers` : 'Hermes needs an answer',
+      detail: question || batchQuestions.map((item) => item.detail).join(' · ') || 'A clarification is waiting in Hermes.',
+      ...(actionableQuestion?.choices.length ? { choices: actionableQuestion.choices } : !batchQuestions.length && choices?.length ? { choices } : {}),
+      ...(actionableQuestion?.multiSelect || (!batchQuestions.length && payload.multi_select === true) ? { multiSelect: true } : {}),
+      ...((actionableQuestion && !actionableQuestion.choices.length && !actionableQuestion.multiSelect) || (!batchQuestions.length && Boolean(question) && !choices?.length && payload.multi_select !== true) ? { freeText: true } : {}),
+    };
+  }
+  if (type === 'approval.request' || type === 'approval') {
+    const description = typeof payload.description === 'string' ? payload.description.trim() : '';
+    const command = typeof payload.command === 'string' ? payload.command.trim() : '';
+    return {
+      kind: 'approval',
+      requestId,
+      serverRequestId,
+      title: 'Approval needed',
+      detail: [description || 'A command is waiting for approval.', command ? `Command: ${command}` : ''].filter(Boolean).join(' · '),
+      ...(choices?.length ? { choices } : {}),
+    };
+  }
+  if (type === 'sudo.request' || type === 'sudo') return { kind: 'sudo', requestId, serverRequestId, title: 'Sudo password needed', detail: 'Open the full Hermes dashboard to enter it securely.' };
+  return {
+    kind: 'secret',
+    requestId,
+    serverRequestId,
+    title: 'Secret needed',
+    detail: typeof payload.prompt === 'string' && payload.prompt.trim() ? payload.prompt.trim() : 'Open the full Hermes dashboard to enter it securely.',
+  };
+}
+
+// The installed gateway wraps every event payload under `payload` (tui_gateway/server.py
+// `_event_frame`); older/legacy frames carried fields at the top level. Read both.
+function eventText(event: JsonRpcEvent, keys: string[]): string {
+  const payload = asRecord(event.payload ?? {});
+  for (const key of keys) {
+    const nested = payload[key];
+    if (typeof nested === 'string') return nested;
+  }
+  for (const key of keys) {
+    const flat = event[key];
+    if (typeof flat === 'string') return flat;
+  }
+  return '';
+}
+
+const HIDDEN_STATUS_KINDS = new Set(['heartbeat']);
+
 export function eventToMessages(event: JsonRpcEvent, existing: ChatMessage[]): ChatMessage[] {
   const type = event.type ?? 'unknown';
   const now = String(Date.now());
   if (type === 'message.delta') {
-    const delta = String(event.delta ?? event.text ?? event.content ?? '');
+    const delta = eventText(event, ['text', 'delta', 'content']);
     let lastIndex = -1;
     for (let index = existing.length - 1; index >= 0; index -= 1) {
       const message = existing[index];
@@ -541,7 +829,7 @@ export function eventToMessages(event: JsonRpcEvent, existing: ChatMessage[]): C
     return [...existing, { id: `assistant-${now}`, role: 'assistant', text: delta, state: 'streaming' }];
   }
   if (type === 'message.complete') {
-    const finalText = String(event.text ?? event.content ?? '').trim();
+    const finalText = eventText(event, ['text', 'content']).trim();
     const withoutThinking = existing.filter((message) => !(message.role === 'status' && message.text === 'Thinking…'));
     let replacedStreaming = false;
     const completed = withoutThinking.map((message) => {
@@ -555,14 +843,21 @@ export function eventToMessages(event: JsonRpcEvent, existing: ChatMessage[]): C
     return completed;
   }
   if (type === 'message.interim') {
-    const interimText = String(event.text ?? event.content ?? '').trim();
+    const interimText = eventText(event, ['text', 'content']).trim();
     return interimText ? [...existing, { id: `assistant-interim-${now}`, role: 'assistant', text: interimText, state: 'complete', meta: 'interim' }] : existing;
   }
   if (type === 'message.start') {
     return [...existing, { id: `status-${now}`, role: 'status', text: 'Thinking…', state: 'complete' }];
   }
-  if (type.includes('tool') || type.includes('status') || type.includes('approval') || type.includes('clarify')) {
-    const text = String(event.message ?? event.status ?? event.name ?? type);
+  if (attentionFromEvent(event)) return existing;
+  if (type === 'status.update') {
+    const kind = eventText(event, ['kind']);
+    const text = eventText(event, ['text']).trim();
+    if (!text || HIDDEN_STATUS_KINDS.has(kind)) return existing;
+    return [...existing, { id: `event-${now}`, role: 'status', text, meta: kind || type }];
+  }
+  if (type.includes('tool') || type.includes('status')) {
+    const text = eventText(event, ['text', 'message', 'status', 'name']) || type;
     return [...existing, { id: `event-${now}`, role: 'status', text, meta: type }];
   }
   return existing;

@@ -1,0 +1,21 @@
+{
+  "warm": {
+    "banner": " Failed to fetch",
+    "status": "error"
+  },
+  "cold": {
+    "url": "chrome-error://chromewebdata/",
+    "title": "\ud83d\udc34 <tailnet-host>",
+    "w": 390,
+    "h": 844,
+    "sx": 0,
+    "sy": 0,
+    "pw": 390,
+    "ph": 844
+  },
+  "restored": {
+    "workers": 0,
+    "cacheNames": [],
+    "overflow": 0
+  }
+}

@@ -1,20 +1,15 @@
 {
   "name": "hermes-mobile-pwa",
   "version": "0.1.0",
-  "description": "Mobile-first PWA companion for self-hosted Hermes Agent dashboards.",
+  "private": true,
+  "description": "Mobile-first PWA companion for self-hosted Hermes Agent.",
   "license": "MIT",
   "type": "module",
-  "homepage": "https://github.com/willscott-v2/hermes-mobile-pwa#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/willscott-v2/hermes-mobile-pwa.git"
-  },
-  "bugs": {
-    "url": "https://github.com/willscott-v2/hermes-mobile-pwa/issues"
-  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "build:candidate": "tsc -b && vite build --outDir dist-candidate",
+    "preview:candidate": "HERMES_PWA_DIST=dist-candidate PORT=4180 HERMES_DASHBOARD_TARGET=http://127.0.0.1:3456 node scripts/tailnet-demo-server.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "demo:tailnet": "node scripts/tailnet-demo-server.mjs",
     "typecheck": "tsc -b --pretty false",
@@ -22,7 +17,8 @@
     "test:e2e": "playwright test",
     "qa:mobile": "node scripts/mobile-ux-qa.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "scan:secrets": "node scripts/scan-secrets.mjs"
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "check:daily": "node scripts/daily-functional-check.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

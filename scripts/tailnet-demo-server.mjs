@@ -6,7 +6,9 @@ import httpProxy from 'http-proxy';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const dist = path.join(root, 'dist');
+// HERMES_PWA_DIST lets a candidate preview serve a separate build directory
+// (e.g. dist-candidate) without touching the live `dist` the LaunchAgent serves.
+const dist = path.resolve(root, process.env.HERMES_PWA_DIST || 'dist');
 const port = Number(process.env.PORT || 4179);
 const target = process.env.HERMES_DASHBOARD_TARGET || 'http://127.0.0.1:9119';
 const proxyPrefix = process.env.HERMES_PROXY_PREFIX || '/hermes';

@@ -1,0 +1,14 @@
+== final gates (post live fixes) Tue Oct  6 16:05:43 CDT 2026
+[2m Test Files [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m      Tests [22m [1m[32m130 passed[39m[22m[90m (130)[39m
+typecheck_exit=0
+✓ built in 94ms
+Smoke OK: dist-candidate app shell is present.
+live dist matches baseline snapshot
+  39 passed (11.0s)
+qa_exit=0
+DIFFCHECK_OK
+  "ok": true,
+  "liveWebSocket": "skipped",
+  "overall": "ok",
+0

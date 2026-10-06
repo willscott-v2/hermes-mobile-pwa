@@ -1,0 +1,66 @@
+Skip to content
+cadu.bot
+Docs
+App
+How it works
+MESSENGER TO YOUR MACHINE
+CADU
+for iOS and iPadOS
+
+A new way to interact with your Hermes agent.
+
+Join TestFlight
+Connect your own Hermes instance
+CADU FOR IPHONE
+Your agents,
+on iPhone.
+
+Chat with your agents, browse their files, and follow their activity from your phone.
+
+Native iPhone app
+Connect your own instance
+Chat, files, and agent activity
+Join TestFlight
+Agents
+Preview
+Nova
+Sprout
+Pixel
+Help me make room for the side project today.
+Nova
+
+Let’s keep it small. One focused hour, one thing finished.
+
+Pick the next little improvement
+Give it an uninterrupted hour
+Leave a note for tomorrow
+today.md
+Workspace
+Message Nova…
+GETTING STARTED
+Connect your agent.
+
+Cadu connects to Hermes. Your agent keeps its tools, files, and memory.
+
+01
+Connect your Hermes
+
+Connect your Hermes instance with a QR code or connection link.
+
+02
+Meet your agents
+
+Pick an agent and bring its conversations, memory, and workspace with you.
+
+03
+Start a conversation
+
+Send messages, manage files, and configure your agent in the app.
+
+QUESTIONS
+Good to know.
+Does the agent run on my phone?
+Can I use my own models?
+What happens when I close the app?
+cadu.bot
+Messenger to your machine.

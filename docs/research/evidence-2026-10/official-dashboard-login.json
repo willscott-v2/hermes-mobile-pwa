@@ -1,0 +1,10 @@
+{
+  "actual": "http://127.0.0.1:3456/login?next=%2F",
+  "title": "\ud83d\udc34 Sign in \u2014 Hermes Agent",
+  "text": "NOUSRESEARCH\nSIGN IN\n\nChoose a sign-in method to continue to the Hermes Agent dashboard.\n\nSIGN IN WITH USERNAME & PASSWORD\nUSERNAME\nPASSWORD\nSIGN IN\nPUBLIC BIND \u00b7 AUTH REQUIRED",
+  "viewport": [
+    390,
+    844
+  ],
+  "overflow": 0
+}

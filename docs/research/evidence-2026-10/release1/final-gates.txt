@@ -1,0 +1,64 @@
+== final gates Tue Oct  6 13:18:27 CDT 2026
+== test
+ Test Files  7 passed (7)
+      Tests  120 passed (120)
+== typecheck
+typecheck_exit=0
+== build:candidate
+✓ built in 134ms
+== smoke (candidate)
+Smoke OK: dist-candidate app shell is present.
+== live dist unchanged?
+live dist matches baseline snapshot
+== e2e
+  39 passed (10.9s)
+== qa:mobile (candidate)
+qa_exit=0
+== scan:secrets
+> hermes-mobile-pwa@0.1.0 scan:secrets
+> node scripts/scan-secrets.mjs
+Potential secret findings:
+docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md: private Tailnet hostname
+docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md: local user path
+docs/plans/2026-10-mobile-pwa-elegance-plan.md: private Tailnet hostname
+docs/plans/2026-10-mobile-pwa-elegance-plan.md: local user path
+docs/research/current-pwa-experience-audit-2026-10.md: private Tailnet hostname
+docs/research/evidence-2026-10/live-offline-observations.json: private Tailnet hostname
+docs/research/evidence-2026-10/verification-final.txt: private Tailnet hostname
+docs/research/evidence-2026-10/verification-recheck.txt: private Tailnet hostname
+docs/research/evidence-2026-10/verification-recheck.txt: local user path
+== diff --check
+DIFFCHECK_OK
+== check:daily
+  "ok": true,
+  "liveWebSocket": "skipped",
+  "overall": "ok",
+== git status
+ M .gitignore
+ M README.md
+ M docs/ARCHITECTURE.md
+ M docs/FEATURE_WISHLIST.md
+ M package.json
+ M scripts/mobile-ux-qa.mjs
+ M scripts/smoke.mjs
+ M scripts/tailnet-demo-server.mjs
+ M src/App.tsx
+ M src/lib/hermesApi.test.ts
+ M src/lib/hermesApi.ts
+ M src/lib/jsonRpc.test.ts
+ M src/lib/jsonRpc.ts
+ M src/lib/mockHermes.ts
+ M src/lib/storage.ts
+ M src/styles.css
+ M tests/e2e/mobile-layout.spec.ts
+?? docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md
+?? docs/plans/
+?? docs/research/
+?? src/lib/attentionState.test.ts
+?? src/lib/attentionState.ts
+?? src/lib/connectionState.test.ts
+?? src/lib/connectionState.ts
+?? src/lib/history.test.ts
+?? src/lib/history.ts
+?? src/lib/storage.test.ts
+?? tests/e2e/read-and-continue.spec.ts

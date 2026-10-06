@@ -1,0 +1,14 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 450,
+    "visualHeight": 450
+  },
+  "cssHeight": "450px",
+  "overflow": 0,
+  "composer": {
+    "top": 354,
+    "bottom": 434
+  },
+  "textareaFont": "16px"
+}

@@ -1,0 +1,103 @@
+2026-10-06T10:17:46-05:00
+## main
+?? docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md
+?? docs/research/
+d63748d feat: answer current gateway approvals on mobile
+80364a9 fix: surface current gateway attention requests
+5a3b3c4 fix: respect gateway approval choices
+3789bed feat: answer free-text clarify prompts on mobile
+85025c3 fix: preserve incomplete pending attention
+7576dac fix: contain long clarify choices on mobile
+2656a69 test: pin sensitive pending restore gap
+5ef4690 fix: remove redundant approval choice chips
+
+> hermes-mobile-pwa@0.1.0 check:daily
+> node scripts/daily-functional-check.mjs
+
+Daily Hermes Mobile functional check: https://<tailnet-host>:8447
+{
+  "ok": true,
+  "baseURL": "https://<tailnet-host>:8447",
+  "requiredPlatforms": [
+    "photon"
+  ],
+  "liveWebSocket": "skipped",
+  "gatewayState": "running",
+  "overall": "ok",
+  "failures": [],
+  "warnings": [
+    "live websocket check skipped: set HERMES_MOBILE_CHECK_USERNAME/PASSWORD or HERMES_MOBILE_CHECK_TOKEN to test the authenticated gateway socket"
+  ]
+}
+
+> hermes-mobile-pwa@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.10 ~/clawd/projects/hermes-mobile-pwa
+
+
+ Test Files  3 passed (3)
+      Tests  37 passed (37)
+   Start at  10:17:48
+   Duration  134ms (transform 77ms, setup 0ms, import 98ms, tests 22ms, environment 0ms)
+
+
+> hermes-mobile-pwa@0.1.0 typecheck
+> tsc -b --pretty false
+
+
+> hermes-mobile-pwa@0.1.0 build
+> tsc -b && vite build
+
+vite v8.2.0 building client environment for production...
+[2K
+transforming...✓ 1789 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.96 kB │ gzip:  0.44 kB
+dist/assets/index-BasYsOo5.css   13.01 kB │ gzip:  3.42 kB
+dist/assets/index-DU3bNYKj.js   246.70 kB │ gzip: 77.84 kB
+
+✓ built in 148ms
+
+> hermes-mobile-pwa@0.1.0 smoke
+> node scripts/smoke.mjs
+
+Smoke OK: dist app shell is present.
+
+> hermes-mobile-pwa@0.1.0 test:e2e
+> playwright test
+
+
+Running 27 tests using 1 worker
+
+  ✓   1 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:13:1 › connect mode picker uses an in-page menu instead of a native mobile select (235ms)
+  ✓   2 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:31:1 › connect mode picker supports keyboard selection without relying on native select UI (141ms)
+  ✓   3 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:47:1 › connect mode picker closes from keyboard without relying on native select UI (144ms)
+  ✓   4 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:56:1 › connect screen keeps actions and status visible on a browser-chrome iPhone viewport (132ms)
+  ✓   5 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:86:1 › connect screen keeps expired-login guidance visible on a browser-chrome iPhone viewport (133ms)
+  ✓   6 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:103:1 › connect screen does not call a missing cookie session an expired saved login (124ms)
+  ✓   7 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:114:1 › connect screen can scroll on a short iPhone viewport (136ms)
+  ✓   8 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:126:1 › sessions screen has an independently scrollable session list (222ms)
+  ✓   9 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:136:1 › new chat sheet owns profile model and reasoning pickers (513ms)
+  ✓  10 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:171:1 › restored batch clarify renders as a compact mobile attention card without overflow (263ms)
+  ✓  11 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:196:1 › multi-select clarify uses an honest mobile fallback instead of sending one choice (267ms)
+  ✓  12 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:214:1 › restored clarify choices keep long unbroken values inside the mobile card (307ms)
+  ✓  13 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:232:1 › restored clarify choice can be answered from the attention card (293ms)
+  ✓  14 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:243:1 › restored free-text clarify can be answered without leaving the mobile card (304ms)
+  ✓  15 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:265:1 › restored approval shows safe command context without hiding the transcript (266ms)
+  ✓  16 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:292:1 › approval card only offers choices allowed by the gateway (277ms)
+  ✓  17 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:309:1 › restored approval can be approved once from the attention card (270ms)
+  ✓  18 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:320:1 › current-protocol approval can be answered from the mobile card (325ms)
+  ✓  19 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:332:1 › restored approval without a request id stays visible as a disabled fallback (313ms)
+  ✓  20 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:356:1 › secret request event uses a compact secure fallback without exposing the environment key (314ms)
+  ✓  21 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:382:1 › sudo request event uses a compact secure fallback without exposing password entry (280ms)
+  ✓  22 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:407:1 › chat composer and transcript controls keep touch-friendly targets (288ms)
+  ✓  23 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:426:1 › chat header truncates long session titles without crowding the status pill (287ms)
+  ✓  24 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:454:1 › mobile transcript keeps URLs clickable while cleaning markdown punctuation (257ms)
+  ✓  25 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:466:1 › document attachment selection shows a compact chip and sends only after upload succeeds (322ms)
+  ✓  26 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:501:1 › chat composer grows for multiline prompts without covering the transcript (276ms)
+  ✓  27 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:526:1 › send button is disabled while a prompt submit is running (312ms)
+
+  27 passed (7.8s)

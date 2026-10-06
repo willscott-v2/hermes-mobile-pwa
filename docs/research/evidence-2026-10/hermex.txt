@@ -1,0 +1,179 @@
+Skip to content
+Hermex
+Download
+Control Hermes
+From your iPhone
+
+A native iPhone and iPad client for your self-hosted Hermes agent. Stream responses, answer approvals, manage tasks and Kanban boards, browse your workspace, and get notified when your agent needs you. The agent runs on your server, not your phone.
+
+Download on iOS
+See how it works
+Free, no IAP
+•
+4.6 on the App Store
+•
+iPhone + iPad
+Full control
+
+Your server. Your iPhone.
+
+Three moves
+
+Run, expose, connect
+
+01
+Run your server
+
+Start the open-source hermes-webui on a machine you control.
+
+$ git clone https://github.com/nesquena/hermes-webui.git && cd hermes-webui && python3 bootstrap.py
+02
+Make it reachable
+
+Keep it private on your tailnet with Tailscale Serve — or expose it over HTTPS with Cloudflare Tunnel. Either way, set a server password first.
+
+$ tailscale serve --bg 8787
+03
+Connect Hermex
+
+Enter your server URL and password in the app. That’s it.
+
+Get Hermex on the App Store
+Full setup guide
+→
+Loved by operators
+
+4.6 on the App Store.
+
+Great app to connect to Hermes
+
+This is honestly the best app for Hermes. I’ve tried several different ways to connect and use Hermes on my iPhone, but Hermex is easily the nicest. It feels like a proper iOS app. Clean, smooth and just really nice to use.
+
+COPYPASTEHERO · SEP 2026
+
+Excellent Hermes Experience
+
+While everyone is aggressively shoveling out their vibe-coded attempts, this app has already perfected the mobile experience for Hermes Agent.
+
+LEEROYJENKINS67 · JUL 2026
+
+Just Amazing
+
+Very professionally designed. I don’t get why this isn’t all over X. Even if / when Hermes comes out with an official mobile app, can’t think of a reason to move.
+
+JOHNINKS · SEP 2026
+
+My daily driver
+
+I appreciate how careful you have been with the user experience, so well done. Thank you!
+
+SJDONADO · SEP 2026
+
+Excellent app - mirrors hermes perfectly
+
+Such a well thought out and written app - it picks up all the essential features and settings of hermes and presents them in a really intuitive way. Highly recommend using this above any other mobile comms with hermes
+
+PANDAMAGIC05 · AUG 2026
+
+Best App for Hermes Web
+
+No subscription, no data collection, fresh and useful UI. Thanks Uzi!
+
+LOVELYLAZERSIGHTS · JUN 2026
+
+Really excellent
+
+Yup. It works quite well. Never know if reviews on AI-related apps are real or not, but the positive reviews for this one are legit. UI is fast and satisfying and doesn’t feel like a PWA or webview.
+
+JANEJRANK · JUL 2026
+
+Works perfectly with Hermes
+
+Running local AI on a local Proxmox server with the Hermex iPhone app giving me actual live and regular notifications is like a dream coming true. Normally I never write reviews, but damn this app works perfectly!
+
+FIDELITY5789 · JUL 2026
+
+Game Changing !!
+
+This app has a professional looking front end, is easy to install and operate and significantly improved my productivity on my Hermes server. … This app is a game changer for me !!!
+
+DEBEERX2 · AUG 2026
+
+Just what was needed!!!
+
+This app goes above and beyond what I was looking for. Using the Telegram chat with Hermes is lacking in privacy and cannot have multiple chats going at once. This app solved all of my agent access problems.
+
+JCROCK · JUN 2026
+
+Read all reviews on the App Store
+
+Questions
+
+Before you connect
+
+What is Hermex?
++
+
+Hermex is a native iPhone and iPad app for steering a Hermes agent you host yourself. The agent runs on your own machine via the open-source hermes-webui server; Hermex connects to it so you can open sessions, stream responses, and direct the agent from wherever you are. Your server runs — your iPhone steers.
+
+What do I need to use it?
++
+
+Two things: a machine you control running hermes-webui — macOS, Linux, or Windows via WSL2, with Python 3.11+ — and an iPhone or iPad with Hermex, free on the App Store. If you don’t have a Hermes Agent setup yet, the server’s bootstrap offers to install one for you.
+
+How do I connect?
++
+
+Three moves: run hermes-webui on your machine, make it reachable with Tailscale Serve or Cloudflare Tunnel, then enter your server URL and password in Hermex. About 15 minutes end to end — the full setup guide walks through every step.
+
+What is hermes-webui?
++
+
+hermes-webui is a third-party open-source (MIT) web UI and server for the Hermes agent. It’s the half that runs on your machine: it hosts the agent and exposes the API that Hermex talks to. It isn’t the dashboard that comes with Hermes Agent — Hermex needs hermes-webui. Hermex itself is a separate app, built for it.
+
+Is it secure?
++
+
+Your phone talks directly to your own server — no developer backend sits in between. Tailscale Serve keeps everything on your private tailnet over HTTPS; Cloudflare Tunnel gives you a public HTTPS hostname without opening a port. Set a server password before exposing it — Hermex uses it only to sign in and doesn’t store it after login. The one exception is optional push notifications: they pass through an open-source relay, and their text is end-to-end encrypted.
+
+Does it collect or store my data?
++
+
+No. Hermex has no analytics, ads, or tracking — your conversations travel between your device and your server. If you turn on push notifications, they go through an open-source relay that sees routing details but never message text, which is end-to-end encrypted. On the device, Hermex keeps your server URL in the iOS Keychain and a small offline cache of recent conversations you can clear anytime. Details in the privacy policy.
+
+Is Hermex open source?
++
+
+Yes. Hermex is open source under the MIT license — the full app source lives on GitHub, so you can read exactly what it does, build it yourself, or open an issue. The server side, hermes-webui, is a separate open-source (MIT) project.
+
+Does it work offline?
++
+
+Sending messages needs a connection — the agent runs on your server, not your device. Offline, Hermex still opens with a read-only cache of your recent conversations, so you can re-read what the agent said without a signal.
+
+Which devices does it support?
++
+
+iPhone and iPad running iOS or iPadOS 18 or later. The server side runs wherever hermes-webui does — macOS, Linux, or Windows via WSL2.
+
+How much does it cost?
++
+
+Nothing. Hermex is free on the App Store — no subscription, no in-app purchases. You bring the server it connects to.
+
+How do I get help?
++
+
+Start with the setup guide — it ends with a troubleshooting section covering the common failure points. Still stuck? Ask in the Hermex Discord or message me on X. Found a bug? Open an issue on GitHub. Server-side issues live upstream at nesquena/hermes-webui.
+
+Hermex
+
+A native iPhone and iPad client for your self-hosted Hermes agent.
+
+Hermex on GitHub (MIT)
+X
+Privacy
+
+© 2026 Uzair Ansar
+
+Your server. Your iPhone.

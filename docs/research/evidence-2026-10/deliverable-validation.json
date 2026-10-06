@@ -1,0 +1,19 @@
+{
+  "required_artifacts": [
+    "docs/research/mobile-agent-benchmark-2026-10.md",
+    "docs/research/current-pwa-experience-audit-2026-10.md",
+    "docs/plans/2026-10-mobile-pwa-elegance-plan.md",
+    "docs/FEATURE_WISHLIST.md"
+  ],
+  "all_exist_nonempty": true,
+  "relative_links_resolve": true,
+  "no_trailing_whitespace": true,
+  "benchmark_product_cards": 11,
+  "plan_phases_and_model_policy_present": true,
+  "citations_with_evidence_pass": true,
+  "unused_ledger_warnings_explained": "sources 1 and 12; see evidence README",
+  "git_diff_check_pass": true,
+  "tracked_product_diff_empty": true,
+  "live_final_receipt": "verification-final.txt",
+  "implementation_authorized": false
+}

@@ -1,0 +1,102 @@
+{
+  "normal": {
+    "viewport": {
+      "width": 390,
+      "height": 844,
+      "visualHeight": 844
+    },
+    "overflow": 0,
+    "controls": [
+      {
+        "tag": "BUTTON",
+        "label": "Back to sessions",
+        "font": "16px",
+        "width": 40,
+        "height": 40,
+        "bottom": 54
+      },
+      {
+        "tag": "BUTTON",
+        "label": " Refresh transcript",
+        "font": "12px",
+        "width": 153.609375,
+        "height": 44,
+        "bottom": 127
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Attach file or screenshot",
+        "font": "16px",
+        "width": 48,
+        "height": 48,
+        "bottom": 810
+      },
+      {
+        "tag": "TEXTAREA",
+        "label": "Message Hermes\u2026",
+        "font": "16px",
+        "width": 242,
+        "height": 56,
+        "bottom": 810
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Send message",
+        "font": "16px",
+        "width": 48,
+        "height": 48,
+        "bottom": 810
+      }
+    ]
+  },
+  "shortViewportSimulation": {
+    "viewport": {
+      "width": 390,
+      "height": 450,
+      "visualHeight": 450
+    },
+    "overflow": 0,
+    "controls": [
+      {
+        "tag": "BUTTON",
+        "label": "Back to sessions",
+        "font": "16px",
+        "width": 40,
+        "height": 40,
+        "bottom": 54
+      },
+      {
+        "tag": "BUTTON",
+        "label": " Refresh transcript",
+        "font": "12px",
+        "width": 153.609375,
+        "height": 44,
+        "bottom": 127
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Attach file or screenshot",
+        "font": "16px",
+        "width": 48,
+        "height": 48,
+        "bottom": 810
+      },
+      {
+        "tag": "TEXTAREA",
+        "label": "Message Hermes\u2026",
+        "font": "16px",
+        "width": 242,
+        "height": 56,
+        "bottom": 810
+      },
+      {
+        "tag": "BUTTON",
+        "label": "Send message",
+        "font": "16px",
+        "width": 48,
+        "height": 48,
+        "bottom": 810
+      }
+    ]
+  }
+}

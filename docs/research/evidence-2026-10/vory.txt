@@ -1,0 +1,300 @@
+Skip to content
+Vory
+Join the beta
+Vory
+Hi, I'm Vory.
+
+Public beta · iPhone and Mac · Open source
+
+Your agents,
+in your pocket.
+
+Vory is the iPhone and Mac remote for your Hermes agent gateway. Your self‑hosted AI agents, as characters you can talk to, on whichever screen is in front of you.
+
+Join the public beta
+See how it works
+
+One TestFlight beta for iPhone and Mac. Talks to a gateway you run. No account, no middleman cloud. The code is on GitHub.
+
+What it is
+
+A remote, not a cloud.
+
+Hermes is a self‑hosted AI agent gateway. It runs profiles: independent agents, each with its own model, tools, memory and personality, on a machine you own. Vory connects to that gateway and turns every profile into a bot: a small living character with a body, eyes and a colour, drawn in Liquid Glass. On your iPhone, and now on your Mac.
+
+Your machine
+
+Your agents run where you put them. Vory talks to your gateway directly, over your LAN, Tailscale or a Cloudflare Tunnel. No port‑forwarding, no middleman.
+
+Your call
+
+When a bot wants to run a shell command or change a file, it waits for your yes. From the chat, from a notification, from the Lock Screen.
+
+Your cast
+
+Every agent is a character, so a house of bots is a cast, not a list of sessions. You always know who is talking and what they are doing.
+
+New · Vory for Mac
+
+The same Vory, in a window.
+
+A real Mac app, built for a window, a keyboard and the menu bar. The same bots, the same chats, the same places as the phone, in the same TestFlight beta.
+
+One chat, open on both. Send from the Mac and it lands on the iPhone as you watch.
+A window and a keyboard
+
+A rail of pages on the left, the chat list beside the open chat, the thread in a reading column. Return sends, Shift‑Return adds a line, drop files or paste images into the composer. ⌘N, ⌘F, ⌘. and the rest.
+
+The menu bar
+
+Running turns and waiting approvals live in the menu bar with Approve and Deny. The Dock icon carries a badge for what needs you. Close the window and the menu bar item stays; Open Vory in it, or the Dock icon, brings the window back.
+
+Widgets and files
+
+Widgets for the desktop and Notification Center. Drop files on the Files page to upload, drag one out to the Finder. Notifications come through the same Companion as the phone.
+
+The 1.3 film: both devices on one chat, an approval answered on one and cleared on the other, iCloud restore, projects, the status line, and each device’s own surface.
+
+Two devices, one app
+
+Pick up on either one.
+
+Nothing to set up between them beyond your own iCloud. Vory still hosts nothing and has no account.
+
+Your setup follows you
+
+Settings, bot looks, your name on Home and your saved gateways sync through your own iCloud. A new device offers Restore from iCloud on its first screen, and one tap brings it all back; a gateway that signs in through a browser or a password asks you to sign in once on the new device.
+
+A yes from either one
+
+An approval card reaches both. Answer it on the Mac or from your pocket and it clears everywhere. The reply keeps streaming on both screens.
+
+Projects, side by side
+
+Group chats by project on both devices, and move a chat to another project from its menu. Handoff carries a chat open on one device to the other.
+
+How it works
+
+The loop.
+
+Connect once. Then every turn goes the same way: you ask, a bot thinks, uses its tools, asks you before anything risky, and replies. Its face tells you what it is doing.
+
+1
+Connect
+
+Point Vory at your gateway: local network, Tailscale, Cloudflare Tunnel, or any URL. Sign in with its token. A guided tour introduces the bots.
+
+2
+Meet your bots
+
+Every profile on the gateway appears as a bot. Design it in the Creator Studio: 8 body shapes, 8 eye styles, any colour, flat or Liquid Glass.
+
+3
+Talk
+
+Messages‑style chats. Bubbles with tails, typing indicators, streamed replies with live token counts, reasoning you can unfold, tool cards, attachments, “/” commands, steering mid‑reply, dictation.
+
+4
+Approve
+
+When a bot needs a yes, an approval card appears in the chat, in a notification, in the Live Activity on the Lock Screen and Dynamic Island, and in the Mac’s menu bar. Approve and Deny are right there.
+
+5
+Get told
+
+The Vory Companion, a small plugin installed on the gateway from the app, sends replies as notifications from the bot on iPhone and Mac, keeps the Live Activity on its phase, and delivers approval requests instantly. Reply from the notification.
+
+6
+Group chats
+
+Put two to six bots in one room and let them talk to you and to each other. Each reply carries its bot’s face.
+
+7
+Run the gateway
+
+Settings for every profile: model, config, API keys, tools, skills, MCP servers, approvals policy, scheduled tasks, sessions, channels, system health, logs, restarts and updates.
+
+8
+Summaries BETA
+
+Apple Intelligence, on‑device, gives every chat a title and a two‑line summary in the list, and a working bot shows the line it is working toward. Nothing leaves the device.
+
+9
+Home
+
+A dashboard with your month in numbers, your bots, the chats to pick back up and what changed while you were away. Drag the cards into your order on the phone or the Mac.
+
+The bots
+
+Meet the bots.
+
+A bot is shape + eyes + colour + finish. Everything is drawn from code; nothing is a sprite. Try one. This is the same drawing the app does, running in your browser.
+
+Vory
+idle
+
+A preview of the bot you are designing.
+
+Body
+
+Eyes
+
+Colour
+
++
+
+Finish
+
+Flat
+Liquid Glass
+
+What it’s doing
+
+Idle
+Working
+Thinking
+Using a tool
+Needs you
+Writing
+Reconnecting
+Error
+Finished ↻
+
+Idle bots barely move: a blink every few seconds, a glance to one side, a rare slow blink. Their eyes follow your scroll.
+
+Idle life
+
+Blinks every ~4 s, every third a double blink. A glance every ~7 s. A rare slow blink. Eyes follow where you scroll. Every bot has its own timing, so a page of them never blinks in unison.
+
+Working
+
+Every 3 s, one small routine: the signature coin‑turn, a glance‑turn, a head tilt, a nod, a lean, a scan, a squint‑and‑settle, a light travelling the glass rim.
+
+States you can read at a glance
+
+Thinking becomes a heavier pebble. Using a tool grows a small stem. Waiting for your approval becomes a bold “!” and holds. An error drops its eyes and the light dies. Reconnecting sweeps its eyes like a metronome. Finished: one full turn.
+
+“If it looks like the bots are dancing, cut it. If it looks like one just had a thought, keep it.”
+
+The one rule of Vory motion. Nothing scales, bounces, hops or pops.
+
+Approve from your pocket
+
+The agent waits for you.
+Not the other way round.
+
+A shell command, a file change, anything that needs a yes: the card lands in the chat, in a notification, and in the Live Activity on your Lock Screen. Once, for the session, always, or deny.
+
+The approval card in the chat, exactly as the app shows it.
+
+Saturday 26 September
+9:41
+
+Vory
+Needs Approval
+Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log
+Approve
+Deny
+Vory
+now
+Done — 4.2 GB freed. Want me to set up log rotation?
+The Live Activity and the reply notification, rebuilt in HTML from the app’s own layouts. Reply from the notification and the answer comes back the same way.
+
+Talk
+
+Chats that feel like Messages.
+Bubbles with tails, typing indicators: grey while the bot writes, dark with a badge while it runs a tool.
+Replies stream in with a live token count. Reasoning unfolds when you want it. Tool calls become cards.
+Attach photos and files as cards. Reply quotes any bubble. Type “/” for commands. Steer a bot mid‑reply. Dictate.
+The chat list shows every bot; with Summaries on, each chat gets a title and two lines, made on the phone.
+Group chats put two to six bots in one room, each reply carrying its bot’s face.
+
+Run the gateway
+
+The whole gateway, from the phone.
+
+Everything a profile is made of, editable where you are. The Vory Companion installs from the app and updates in place, like a software update.
+
+Model
+Config
+API keys
+Tools
+Skills
+MCP servers
+Approvals policy
+Scheduled tasks
+Sessions
+Channels
+System health
+Logs
+Restart
+Software Update
+9:41
++
+
+Bots
+
+Pip
+model
+Juno
+model
+Ivy
+model
+Bo
+model
+Otto
+model
+Remy
+model
+Sol
+model
+Nova
+model
+Bots
+
+Yours, all the way down
+
+Nothing between you and your machine.
+Runs where you put it
+
+Your agents run on your machine. Vory is the remote. No middleman cloud, no account to create.
+
+Reaches it your way
+
+Local network, Tailscale or a Cloudflare Tunnel. No port‑forwarding. Your credentials stay in the Keychain.
+
+Keeps what it learns
+
+Summaries are made on the phone with Apple Intelligence. This site sets no cookies and runs no analytics.
+
+Vory
+
+Public beta
+
+Get the beta.
+
+Vory is a TestFlight public beta, one beta for both apps. You’ll need an iPhone on iOS 26 or later, or a Mac on macOS 26 or later, TestFlight, and a Hermes gateway you run.
+
+Join the public beta
+
+Not on the App Store yet. Open TestFlight on the device you want it on.
+
+Releases and what is being fixed, as they happen: @_mattwagner_ on X.
+
+FAQ
+
+Questions.
+What is Hermes?
+Does Vory need an account or a cloud?
+What is the Vory Companion?
+How do I reach my gateway from outside my home?
+Is it on the App Store? Android? Mac?
+Is Vory open source?
+Where do updates get posted?
+Why do the bots move so little?
+
+Vory · Public beta · Open source
+
+The iPhone and Mac remote for your Hermes agent gateway. No cookies, no analytics.
+
+© 2026 Vory · GitHub · X · Privacy

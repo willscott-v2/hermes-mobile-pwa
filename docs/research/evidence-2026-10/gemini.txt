@@ -1,0 +1,101 @@
+Skip to main content
+Gemini Apps Help
+Sign in
+Help Center
+Community
+Privacy Hub
+Gemini Apps
+Talk naturally with Gemini Live
+
+With Gemini Live, you can have a natural, free-flowing conversation with Gemini. You can even interrupt it like when you want to add more details or change the topic of the conversation. With Gemini Live, you can:
+
+Talk back and forth: Talk to Gemini without typing, and Gemini will respond back verbally.
+Brainstorm ideas out loud: Ask for a gift idea, to plan an event, or to make a business plan.
+Explore: Uncover more details about topics that interest you.
+Practice aloud: Rehearse for important moments in a more natural and conversational way.
+
+Important: We’re gradually releasing updates to Gemini Live, so the latest changes might not be available to you just yet.
+
+iPhone & iPad Android
+What you need
+An iPhone or iPad.
+The Gemini mobile app.
+For now, Gemini Live isn’t available in the Gemini web app.
+A personal Google account that you manage on your own or a work or school Google account with access to Gemini Apps.
+
+Be over 13 (or the applicable age in your country).
+
+To use this feature, you must be signed in to Gemini Apps. Learn how to sign in to Gemini Apps.
+
+Important:
+
+The Gemini mobile app doesn’t currently support Farsi. Learn more about Gemini mobile app availability.
+For now, Gems can't be used with Gemini Live.
+Before you use Gemini Live
+Respect others’ privacy and ask permission before recording or including them in a Live chat.
+Learn how Google works with Gemini Live data.
+Go Live with Gemini
+On your iPhone or iPad, open the Gemini mobile app .
+At the bottom, tap Live  or swipe left.
+For your first time, follow any on-screen instructions.
+Start talking.
+
+Tip: To turn off the mic, tap Hold  or End .
+
+Examples
+I’m about to interview my first big guest for a podcast, and want to make sure I don’t mess up. Any last minute tips?
+So my friend is really tough to shop for. Can you help me think of a gift?
+What’s the best way to kickstart my day and feel super productive? I’ve got a big meeting coming up and want to be on top of my game.
+Your Gemini Live data
+
+Learn more about how Google works with Gemini Live data.
+
+Manage your Live chat with Gemini
+Put Live on hold & resume the Live chat
+Mute a Live chat
+Exit or resume a Live chat & review the transcript
+Switch between Live and non-Live chat modes
+Share your camera or screen with Live
+Share your camera in Live
+Share your device’s screen in Live
+Use Connected Apps & services in Gemini Live chats
+
+Gemini Live can use some Connected Apps and other services integrated with Gemini chats to help you with tasks like adding an event to your calendar and searching for recommended restaurants nearby.
+
+Connected Apps & integrated services that can be used in Gemini Live chats
+Connect an app
+Undo an action
+Use Live in the background
+Talk to Gemini in the background
+Continue your Live chat on lock screen
+Manage settings
+Change Gemini’s voice
+Turn Interrupt Live responses on or off
+Turn on captions for Gemini Live
+Related resources
+Get started with the Gemini mobile app
+What you can do with your Gemini mobile app
+Change Gemini's voice
+Gemini Apps Privacy Hub
+Need more help?
+Try these next steps:
+Post to the help community
+Get answers from community members
+Help
+Get started with the Gemini mobile app
+What you can do with your Gemini mobile app
+Gemini mobile app availability
+How your Gemini mobile app can help when your phone is locked
+Talk naturally with Gemini Live
+Manage or delete the Gemini app on your Android device
+Use Gemini on your headphones
+Use screen actions to chat with the Gemini mobile app
+Add & customize your Gemini widget
+Use Gemini on your smartwatch
+Ask Gemini to handle your multi-step tasks in select Android apps
+Get Started with Gemini Go
+Ask Gemini to handle your everyday phone calls
+Get audio descriptions with Guided Vision in Gemini Live
+©2026 Google  Privacy Policy  Terms of Service
+Language
+English‎

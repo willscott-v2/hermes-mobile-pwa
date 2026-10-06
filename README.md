@@ -1,229 +1,87 @@
 # Hermes Mobile PWA
 
-**A phone-first, installable control surface for self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent) dashboards.**
+A mobile-first progressive web app for controlling a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent) from a phone without Xcode, TestFlight, or iOS-specific dependencies.
 
-Hermes Mobile PWA is a lightweight React/Vite progressive web app for using Hermes from iPhone/Android browsers without Xcode, TestFlight, a native app, or a desktop-sized dashboard. It is intentionally a thin client: no agent loop, model provider key, or Hermes runtime logic runs in the browser. The app talks to a user-owned Hermes dashboard over REST plus `/api/ws` JSON-RPC.
+This repo is intentionally a thin client: no agent logic runs in the browser. The app talks to a Hermes dashboard over REST and `/api/ws` JSON-RPC.
 
-<p>
-  <a href="https://github.com/willscott-v2/hermes-mobile-pwa/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
-  <img alt="PWA" src="https://img.shields.io/badge/PWA-installable-ffb000" />
-  <img alt="React" src="https://img.shields.io/badge/React-19-61dafb" />
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6" />
-</p>
+## Status
 
-<table>
-  <tr>
-    <td width="33%" align="center">
-      <img alt="Hermes Mobile connect screen" src="docs/images/mobile-connect.png" />
-      <br /><sub>Private dashboard login</sub>
-    </td>
-    <td width="33%" align="center">
-      <img alt="Hermes Mobile sessions screen" src="docs/images/mobile-sessions.png" />
-      <br /><sub>Recent sessions</sub>
-    </td>
-    <td width="33%" align="center">
-      <img alt="Hermes Mobile chat screen" src="docs/images/mobile-chat.png" />
-      <br /><sub>Phone-friendly chat</sub>
-    </td>
-  </tr>
-</table>
+Initial MVP. Working pieces:
 
----
+- mobile-first installable PWA shell
+- safe connection screen with password/token/mock modes
+- recent session list
+- live chat screen with WebSocket JSON-RPC adapter
+- mock mode for development and screenshots without a Hermes server
+- no active service worker: `src/registerServiceWorker.ts` unregisters workers and clears caches on load (offline shell is a later project); API responses are never cached
+- TypeScript tests and secret scan
 
-## Contents
+## Recommended deployment
 
-- [Why this exists](#why-this-exists)
-- [What works today](#what-works-today)
-- [Quick start](#quick-start)
-- [Connect to a real Hermes dashboard](#connect-to-a-real-hermes-dashboard)
-- [Recommended deployment](#recommended-deployment)
-- [Auth model](#auth-model)
-- [Mobile/PWA behavior](#mobilepwa-behavior)
-- [Development scripts](#development-scripts)
-- [Project layout](#project-layout)
-- [Security notes](#security-notes)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
+Run it same-origin with the Hermes dashboard or behind a private network/VPN such as Tailscale. Do **not** expose your Hermes dashboard or this client to the open internet without a real authentication boundary.
 
----
-
-## Why this exists
-
-Hermes Agent is most useful when it is available where you are. The desktop dashboard is powerful, but phones need a different shape:
-
-- a safe connection flow that does not persist passwords
-- an installable app-shell with mobile safe-area handling
-- recent sessions that can be resumed quickly
-- a composer that does not get buried by mobile browser chrome or the software keyboard
-- transcript rendering that hides internal/tool JSON while keeping real assistant output readable
-- attachments from the phone: screenshots, PDFs, and files
-- mock mode so contributors can build and test without a private Hermes server
-
-Hermes Mobile PWA focuses on that phone companion use case.
-
-## What works today
-
-- **Installable mobile PWA shell** with app icons, manifest, and offline app-shell caching.
-- **Password login flow** for Hermes dashboard auth using httpOnly cookies and WebSocket tickets.
-- **First-run onboarding and saved server profiles** for mock, private dashboard, and same-origin proxy setups without persisting passwords.
-- **Connection diagnostics** for URL normalization, dashboard status, auth providers, login/session readiness, and gateway ticket readiness.
-- **Experimental token mode** for deployments that intentionally expose dashboard-compatible bearer auth.
-- **Mock mode** for demos, screenshots, and contributor development with no live Hermes server.
-- **Recent session list** with search and new-chat flow.
-- **Live chat over `/api/ws` JSON-RPC** using `session.create`, `session.resume`, and `prompt.submit`.
-- **Composer runtime controls** for dashboard-exposed profile, project, and model options while preserving backend-default behavior when catalogs are unavailable.
-- **Transcript refresh/resume hardening** for Hermes sessions that continue under latest-descendant session IDs.
-- **Mobile transcript cleanup** that hides persisted tool/internal artifacts and keeps URLs clickable.
-- **Attachments**: images/screenshots, PDFs, and other files route to the matching Hermes attach methods when available.
-- **Automated QA**: unit tests, Playwright mobile e2e, smoke tests, public-release secret scan, and screenshot-based mobile layout checks.
-
-## Quick start
-
-```bash
-git clone https://github.com/willscott-v2/hermes-mobile-pwa.git
-cd hermes-mobile-pwa
+```sh
 npm install
 npm run dev
 ```
 
-Open:
+Open `http://127.0.0.1:5178` for local development.
 
-```text
-http://127.0.0.1:5178
-```
+To connect to a real Hermes server, run the dashboard on a reachable private address with username/password auth enabled:
 
-For contributor/demo work, choose **Mock** mode on the connect screen. Mock mode uses local fixture data only and requires no Hermes server or credentials.
-
-## Connect to a real Hermes dashboard
-
-Run Hermes dashboard on a private reachable address with username/password auth enabled:
-
-```bash
+```sh
 hermes dashboard --host 0.0.0.0 --port 9119 --no-open
 ```
 
-Then open Hermes Mobile PWA and enter a private-network URL such as:
-
-```text
-http://<tailnet-host>:9119
-```
-
-For setup details and password reset guidance, see [`docs/AUTH_SETUP.md`](docs/AUTH_SETUP.md).
-
-## Recommended deployment
-
-The safest deployment is **same-origin with the Hermes dashboard** or behind a private network/VPN such as Tailscale.
-
-Recommended patterns:
-
-1. **Local development** — run `npm run dev` and use Mock mode.
-2. **Private-network PWA** — build the static app and serve it from the same origin or a trusted reverse proxy in front of the Hermes dashboard.
-3. **Path-prefixed proxy** — set `HERMES_PROXY_PREFIX` and `HERMES_DASHBOARD_TARGET` when using `scripts/tailnet-demo-server.mjs` for a local demo proxy.
-
-Do **not** put a Hermes dashboard or this client on the open internet without a real auth boundary, TLS, rate limiting, and a deployment model you have reviewed.
+Then enter `http://<tailnet-host>:9119` in the app.
 
 ## Auth model
 
-Hermes Mobile PWA is meant to connect to the **Hermes dashboard API**, not the separate OpenAI-compatible API server.
+See [`docs/AUTH_SETUP.md`](docs/AUTH_SETUP.md) for operator setup instructions.
 
-- **Password mode** — preferred. The app posts to `/auth/password-login`; Hermes returns httpOnly cookies. Before opening `/api/ws`, the app requests a single-use `/api/auth/ws-ticket`.
-- **Token mode** — experimental compatibility hook only. `API_SERVER_KEY` does **not** authenticate the dashboard `/api/sessions` + `/api/ws` routes used here.
-- **Mock mode** — local demo adapter. It makes no network calls and stores no credentials.
+- **Password mode:** preferred. The app posts to `/auth/password-login`; Hermes returns httpOnly cookies. The app mints a fresh `/api/auth/ws-ticket` before opening `/api/ws`.
+- **Token mode:** experimental compatibility hook only. The ordinary `API_SERVER_KEY` is for the separate OpenAI-compatible API server and does **not** authenticate the dashboard `/api/sessions` + `/api/ws` endpoints used by this PWA.
+- **Mock mode:** demo adapter; no network calls, no credentials.
 
-Credential boundaries:
+## Open-source safety notes
 
-- Dashboard passwords are never persisted by this app.
-- Non-secret connection hints may be stored locally for convenience.
-- Token persistence is opt-in and should only be used on trusted devices/private networks.
+- Do not commit real Hermes server URLs, session IDs from private systems, tokens, screenshots with personal data, or `.env` files.
+- API responses and chat content are treated as untrusted data.
+- Assistant/tool output is rendered as text in this MVP. No server-provided HTML is injected into the DOM.
+- There is currently no registered service worker and no Cache Storage; `/api/`, `/auth/`, and WebSocket traffic are never cached. Local storage holds only the server URL, a login hint, an optional remembered token, and a host/base-path/profile-scoped *Continue* reference (session id + title). Private previews/transcripts are not persisted; **Forget this device** on the Connect screen clears only this app's keys.
 
-## Mobile/PWA behavior
+## Scripts
 
-The app is designed around phone constraints rather than shrinking a desktop dashboard:
-
-- `visualViewport`-aware layout variables for iOS Safari/PWA browser chrome and keyboard behavior.
-- Fixed composer with only the message pane scrolling.
-- App-shell-only service worker caching; API, auth, and WebSocket traffic are never cached.
-- URL linkification after mobile text cleanup so assistant-shared links stay tappable.
-- Attachment chips that show selected filenames and keep files visible until upload/send succeeds.
-
-## Development scripts
-
-```bash
-npm run dev           # Vite dev server
-npm run typecheck     # TypeScript project references
-npm test              # Vitest unit tests
-npm run test:e2e      # Playwright mobile Chromium tests
-npm run build         # production build
-npm run smoke         # verify dist app-shell files/markers
-npm run scan:secrets  # public-release safety scan
-npm run qa:mobile     # generate mobile screenshots + DOM metrics
+```sh
+npm test              # unit tests
+npm run typecheck     # TypeScript
+npm run build         # production build into dist/ — WARNING: the live LaunchAgent serves dist/ directly, so this deploys
+npm run build:candidate   # build into dist-candidate/ (never served live)
+npm run preview:candidate # serve dist-candidate on 127.0.0.1:4180 with /hermes -> 127.0.0.1:3456
+npm run smoke         # verifies dist files/markers (HERMES_PWA_DIST=dist-candidate to check a candidate)
+npm run scan:secrets  # simple public-release safety scan
 ```
-
-Full local gate before pushing:
-
-```bash
-npm run typecheck \
-  && npm test \
-  && npm run build \
-  && npm run smoke \
-  && npm run scan:secrets \
-  && npm run test:e2e \
-  && npm run qa:mobile
-```
-
-## Project layout
-
-```text
-src/App.tsx                    # main mobile UI/state machine
-src/lib/hermesApi.ts           # REST + WebSocket Hermes dashboard adapter
-src/lib/jsonRpc.ts             # JSON-RPC peer helper
-src/lib/mockHermes.ts          # local mock sessions/chat adapter
-src/lib/mobileText.ts          # mobile transcript cleanup
-src/lib/storage.ts             # non-secret local persistence helpers
-public/manifest.webmanifest    # PWA metadata
-public/sw.js                   # app-shell-only service worker
-public/icons/                  # SVG/PNG PWA icons
-scripts/scan-secrets.mjs       # public-release safety scan
-scripts/mobile-ux-qa.mjs       # mobile screenshot/DOM QA
-scripts/tailnet-demo-server.mjs # optional static + proxy demo server
-docs/                          # architecture/auth/contributor docs
-```
-
-## Security notes
-
-Hermes Mobile PWA controls a user's self-hosted agent. Treat it like a remote shell control surface.
-
-- Keep deployments private-network-first unless you have reviewed the full auth/proxy boundary.
-- Do not commit real Hermes URLs, session IDs from private systems, tokens, screenshots with personal data, `.env` files, or local Hermes state.
-- Server responses and chat content are untrusted data.
-- Do not render assistant/tool/user content with raw HTML injection.
-- The service worker intentionally bypasses `/api/`, `/auth/`, and non-GET requests.
-
-See [`SECURITY.md`](SECURITY.md) and [`PUBLIC_RELEASE_AUDIT.md`](PUBLIC_RELEASE_AUDIT.md).
 
 ## Roadmap
 
-Good next issues for contributors:
+See [`docs/FEATURE_WISHLIST.md`](docs/FEATURE_WISHLIST.md) for the prioritized mobile-control-surface wishlist.
 
-- richer Markdown/code rendering with a reviewed sanitizer
-- approve/deny and clarify cards wired to real pending-input frames
-- stronger attachment progress/error UI
+Current top priorities:
+
+- approval/clarify attention cards wired to real pending-input frames
+- pending prompt restore/replay support on session resume
+- authenticated restore/WebSocket coverage in `npm run check:daily`
+- compact tool activity with expand-on-tap
+- Web Push re-engagement, where browser support and deployment constraints allow it
+- better Tailscale/setup diagnostics
+- clipboard screenshot paste where browser APIs allow it
+- session pin/rename/archive/delete actions
+- TTS/audio playback bubbles for generated media
 - slash command palette
-- profile switcher
-- cron job views/controls
-- Web Push where browser support and deployment constraints allow it
-- optional OIDC/OAuth deployment guide for internet-facing installs
 
-## Contributing
+## Release 1: Read and continue (candidate, not yet deployed)
 
-Contributions are welcome, especially from people running Hermes on phones or private homelab/Tailscale setups.
-
-Start here:
-
-1. Use Mock mode to reproduce UI behavior without private infrastructure.
-2. Add or update tests for visible mobile behavior.
-3. Run the full local gate above.
-4. Keep screenshots, fixture URLs, and docs public-safe.
-5. Open a PR with screenshots or a short screen recording for UI changes.
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the maintainer workflow and public-release rules.
+- Opening a session loads its newest 120 raw messages from `GET /api/sessions/{id}/messages?order=latest`; **Load older messages** pages backward (offset counted from the newest) with a stable reading anchor; the beginning is marked only when the server returns fewer rows than requested. Refresh merges the newest page and keeps already-loaded older pages.
+- Header states are derived from evidence: *Server reachable* ≠ *Signed in* ≠ *Ready*; *Running* comes from `session.resume`'s `running` flag; *Needs you* overrides everything else.
+- After a turn completes the composer sends an ordinary follow-up in the same session. While a turn is running the composer offers **Queue** (`prompt.submit` with `queued: true`) and **Steer** (`session.steer`); a bare `prompt.submit` is never sent mid-turn because the host's `busy_input_mode: interrupt` would interrupt the live turn. Unsupported steer keeps the draft and says so.
+- Approval/clarify responses show *sent; checking status* until a gateway cancel/expire frame or continued output confirms them; a second tap can never send a second response. The client advertises `client.capabilities {server_requests:true}` on every connection (required by the installed gateway) and hands back requests it cannot render (sudo/secret/multi-select) with error 4404 so the agent is not left waiting on the phone. Stop/interrupt is intentionally not exposed.

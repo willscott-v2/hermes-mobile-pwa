@@ -1,0 +1,130 @@
+Skip to content
+HERMES
+CONDUIT
+Get Conduit
+↗
+Menu
+☰
+
+HERMES, ON IPHONE & IPAD
+
+Your agent.
+Within reach.
+
+Pick up a conversation. Read the work. Keep things moving, wherever you are.
+
+Download for iOS
+↗
+Explore the app
+↓
+
+A native iPhone and iPad client for your self-hosted Hermes Agent.
+
+↗
+THE ACTUAL APP
+Take a closer look ↗
+Scroll to explore
+↓
+CONDUIT-CHAN
+✦
+Native to iPhone & iPad
+↗
+Connects to your Hermes dashboard
+⌘
+Independent & open source
+
+01 / KEEP THE WORK MOVING
+
+H → C
+↗
+SESSIONS
+Pick up the thread
+↗
+KANBAN
+See what's next
+Step away.
+Stay with it.
+
+The conversations you started at your desk are ready when you reach for your phone.
+
+01
+Same sessions. New vantage point.
+
+Return to your conversations and switch between the profiles you already use.
+
+02
+Keep the next move in view.
+
+Open your Kanban board, check the work, and see what needs your attention.
+
+Need help connecting? Setup guide
+→
+See how Conduit connects
+↗
+
+02 / A CLOSER LOOK
+
+Give the answer
+room to breathe.
+
+Code, tables, and rich responses, in a conversation made for touch.
+
+Code blocks
+Tables
+Math
+Mermaid diagrams
+◐ Dark
+☼ Light
+
+A look inside Conduit's dark appearance.
+
+Explore settings ↗
+Appearance controls ↗
+INSIDE CONDUIT
+DARK APPEARANCE
+↗
+Real app screen · Code and tables
+Click to see the full screen ↗
+
+03 / MEET CONDUIT-CHAN
+
+RESEARCH / BUILD / ASSIST
+Always another idea in the notebook.
+A familiar face.
+A curious mind.
+
+Meet Conduit-chan. Researching, building, assisting—and occasionally taking the assignment a little too literally.
+
+A DAY IN THE LIFE
+Episode 01 — Cleanup
+33 SEC
+Watch Episode 1 on YouTube
+↗
+View the full playlist
+↗
+
+TAKE THE THREAD WITH YOU
+
+Your dashboard.
+In your pocket.
+
+Bring your Hermes installation.
+Conduit brings it within reach.
+
+Download on the App Store
+↗
+
+For iPhone & iPad · iOS 17 or later
+
+HERMES
+CONDUIT
+
+Independent. Open source. A little curious.
+
+Setup
+GitHub ↗
+Ko-fi ☕
+Docs ↗
+Back to top ↑
+© 2026 Hermes Conduit · MIT licensed
+Not affiliated with or endorsed by Nous Research.

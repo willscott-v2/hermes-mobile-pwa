@@ -1,0 +1,4 @@
+{
+  "success": false,
+  "error": "OpenAI Native Web Search (Codex Responses) is a search-only backend and cannot extract URL content. Set web.extract_backend to firecrawl, tavily, keenable, exa, or parallel."
+}

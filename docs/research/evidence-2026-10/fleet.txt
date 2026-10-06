@@ -1,0 +1,386 @@
+Skip to content
+Navigation Menu
+Sign in
+AIowa-LLC
+/
+hermes-fleet
+Public
+Notifications
+Fork 3
+ Star 23
+Code
+Issues
+82
+Pull requests
+15
+Actions
+Projects
+main
+Go to file
+Code
+Latest commit
+ 
+History
+Folders and files
+Name	Last commit message	Last commit date
+
+.github
+	
+ 
+	
+ 
+
+
+Design
+	
+ 
+	
+ 
+
+
+HermesFleetApp.xcodeproj
+	
+ 
+	
+ 
+
+
+HermesFleetApp
+	
+ 
+	
+ 
+
+
+HermesFleetAppTests
+	
+ 
+	
+ 
+
+
+HermesFleetAppUITests
+	
+ 
+	
+ 
+
+
+Packages
+	
+ 
+	
+ 
+
+
+assets
+	
+ 
+	
+ 
+
+
+docs
+	
+ 
+	
+ 
+
+
+integrations/hermes-liveops
+	
+ 
+	
+ 
+
+
+scripts
+	
+ 
+	
+ 
+
+
+.gitignore
+	
+ 
+	
+ 
+
+
+.gitleaks.toml
+	
+ 
+	
+ 
+
+
+AGENTS.md
+	
+ 
+	
+ 
+
+
+CONTRIBUTING.md
+	
+ 
+	
+ 
+
+
+LICENSE
+	
+ 
+	
+ 
+
+
+Makefile
+	
+ 
+	
+ 
+
+
+PRIVACY.md
+	
+ 
+	
+ 
+
+
+README.md
+	
+ 
+	
+ 
+
+
+RELEASES.md
+	
+ 
+	
+ 
+
+
+SECURITY.md
+	
+ 
+	
+ 
+
+
+TERMS.md
+	
+ 
+	
+ 
+
+
+m10_validate.sh
+	
+ 
+	
+ 
+
+
+m11_validate.sh
+	
+ 
+	
+ 
+
+
+project.yml
+	
+ 
+	
+ 
+Repository files navigation
+README
+Contributing
+MIT license
+Security
+Hermes Fleet
+
+Hermes Fleet is a native iPhone control plane for user-owned Hermes Agent deployments. It connects directly to gateways selected by the user so fleet state, conversations, controls, and credentials stay between the phone and the user's Hermes infrastructure.
+
+Status
+
+Hermes Fleet is under active development. The current project targets iOS 26, uses Swift 6, and is generated from project.yml with XcodeGen.
+
+This repository contains source code and development tooling. It does not require an AIowa-hosted relay or shared operator account. The capability list describes source behavior; consult RELEASES.md for the exact contents and status of a distributed build.
+
+Capabilities
+
+Current surfaces include:
+
+eight top-level destinations — Bots, Chats, Groups, Scheduled, Kanban, Fleet, Settings, About — with canonical screen ownership, including Groups rooms opened from the Bots roster (see docs/navigation.md)
+Live Ops — operations, subagent detail, and approval attention from reporting gateways, with explicit coverage limits
+Fleet Home — a truthful glance surface: connected/known-bot facts, known attention items, real execution activity, this phone's recent destinations, and connection summaries (coverage limits below)
+Gateway Detail — one cockpit per machine: identity, connection controls, current work, the machine's attention item, and its resource rows (Bots, Groups, Projects, Kanban, Schedules, Skills, Memory)
+multi-gateway registration, connection state, health, and fleet roster
+Bot Mode: a fleet-wide Bots roster with full bot lifecycle management (see Bot Mode below)
+Groups — a separate fleet-wide home for hosted and archived group rooms, apart from ordinary conversations in Chats
+Settings and About — dedicated destinations for preferences, security, local data, app information, and legal/support links
+canonical Bot Chat with continuous-chat semantics, @Bot mentions, and Bot Routines
+hosted Group rooms, including cross-gateway rooms linked over gateway-to-gateway RoomLink
+RoomLink management: peer grants and route registration, replication/replay, and authority promotion
+streaming conversations with reconnect and replay handling
+gateway authentication and Keychain-backed credential storage
+approvals, session controls, model selection, context information, cron, and skills
+Kanban visibility and task editing when the gateway exposes a board operator; memory graph and Projects browsing
+attachments, message reactions, and on-device voice input/output
+
+Some features depend on methods exposed by the connected Hermes gateway version. Unsupported capabilities should fail closed or remain unavailable rather than fabricate state.
+
+Fleet Home coverage honesty
+
+Fleet Home's attention and activity sections are known-items only:
+
+Needs You lists observed gateway failures, room attention, and approvals reported by supporting Live Ops gateways. It is not a fleet-wide pending-action inbox — unobserved rooms contribute nothing, and incomplete coverage is labeled as such ("N known items"), never rendered as an empty inbox.
+Active Now shows roster execution signals and operations reported by supporting Live Ops gateways. Missing or stale coverage stays explicit; unseen activity is not claimed as idle.
+Continue is device-local: a recent-open index on this phone (at most 50 references, 30-day retention, pruned on gateway removal). It is not synchronized across devices.
+Unknown never renders as zero. A partial fleet outage is shown as partial, not as "all quiet".
+Bot Mode
+
+Bot Mode is implemented against the Hermes gateway's groups.* and bot-profile surfaces. The iPhone is the controller; the gateways are the compute and agent plane.
+
+Fleet-wide Bots roster — every bot on every registered gateway, identified by source-qualified (GatewayID + ProfileSlug) identity. Bots with the same name on different gateways are never merged into one local slug.
+Bot creation and full profile editing — name/display name, description, model/provider configuration, SOUL file editing, Skills/Toolsets/MCP toggles, with confirm-required guards for expensive model changes.
+Sections — organize the roster into sections; delete returns bots to Unassigned.
+Hidden and pinned bots — hidden bots stay mentionable but leave the default roster view; pinned bots float to the top.
+Avatar identity — real avatars per bot, avatar upload and clear, and a generated-portrait workflow with preview and explicit confirmation.
+Canonical Bot Chat — each bot has one canonical chat. It is continuous: /new and /reset are protected and redirect to /compact instead of resetting context. Canonical Bot Chats are filtered out of the ordinary Chats list.
+@Bot mentions — autocomplete over the live fleet roster. Duplicate names disambiguate with a friendly gateway/device label (@researcher-mac, @researcher-4090) and only fall back to a short deterministic suffix if the qualified label still collides. A mention identifies a teammate; it does not by itself confirm remote dispatch.
+Bot Routines — structured schedules (interval and time-of-day) with a raw-expression escape hatch, edited through the normal profile surface.
+Hosted Groups — create and chat in gateway-hosted rooms (groups.create / groups.send / groups.log), with pending approvals, retries, stop, rename, and disband.
+Cross-gateway Groups — a room hosted on one gateway can link members whose bots live on another gateway. Setup is create on home → invite on target → register on home; the two gateways then talk directly gateway-to-gateway over RoomLink. The iPhone never relays room traffic and Fleet makes no background-relay claims.
+RoomLink management — per-room panel for capability negotiation (honest unsupported state when the gateway disables RoomLink), peer grants with explicit TTL, route registration using the target's exact advertised capability catalog, grant revocation, and peer-route status.
+Replication and promotion — manual replay pulls the authority's real room profile and verbatim groups.log pages and submits them to groups.replicate (idempotent; refuses sequence gaps and authority-epoch regressions). Promotion is a takeover gated behind an explicit confirmation naming the previous authority; it requires confirm: true and a caught-up replica.
+Capability-gated behavior — RoomLink compatibility is decided by the advertised protocol_versions list (membership, not a single version), the advertised method list, and the endpoint/transport capability. Missing, empty, or changed capability information fails closed.
+Not currently supported
+Cross-gateway @Bot DM relay is not guaranteed by Fleet. Mentioning a remote bot identifies it and passes route identity to the agent, but Fleet does not verify or relay the remote messaging route; delivery depends on gateway-side message_agent availability.
+RoomLink carries text only (no attachments) across gateways; the composer hides the attachment tray accordingly.
+The iPhone does not courier RoomLink traffic in the background — gateway-to-gateway linking is the gateways' own direct connection.
+Architecture
+FleetCore          domain models, policies, and cross-module seams
+   ▲
+   ├─ FleetNetworking   JSON-RPC/WebSocket transport and gateway clients
+   ├─ FleetSecurity     Keychain-backed credentials, tokens, and trust pins
+   ├─ FleetPersistence  SwiftData non-secret cache and snapshots
+   └─ FleetUI           SwiftUI screens and view models
+
+HermesFleetApp     composition root that wires concrete implementations
+
+
+FleetUI does not import FleetNetworking. Transport abstractions live in FleetCore, and the app target is responsible for composition. See docs/architecture.md for the current architecture and known design work.
+
+Requirements
+macOS with Xcode 26.x or 27.x
+Swift 6 toolchain
+XcodeGen
+an iOS 26 simulator or compatible device
+gitleaks for the full repository validation gate
+Build and test
+
+The committed Xcode project is generated output. project.yml is the source of truth:
+
+modify project.yml (never hand-edit HermesFleetApp.xcodeproj/project.pbxproj)
+run xcodegen generate
+commit both files together
+
+CI enforces this with a drift gate: the build fails when the committed project differs from what xcodegen generate produces (bash scripts/xcodegen_drift_gate.sh locally).
+
+xcodegen generate
+make build
+make test
+make test-core
+make dev-check
+make validate
+
+make dev-check is the fast local development loop: static guards, a simulator build, package tests, and the focused UI suites selected from the working diff (see docs/dev-loop.md). The authoritative broad repository/CI validation gate is scripts/c1_ci_validate.sh — XcodeGen generation and drift gate, package tests, hosted unit tests, simulator UI suites, module-boundary enforcement, the public-safety residue guard, and gitleaks. Run make ci (or the script directly) before opening a pull request.
+
+On GitHub, pull requests run a fast preflight — static guards, package tests, unit tests, and a focused UI subset selected from the changed files — while merge-queue candidates run the complete validation (all five UI shards) against the exact queued candidate; a single CI Gate check summarizes the result for each topology. Locally make ci runs the identical full phases in sequence.
+
+For the repository safety gates:
+
+bash scripts/public_safety_guard.sh
+gitleaks detect --source . --no-git
+
+The GitHub Actions workflow runs the repository's C1 validation for source, project, test, and CI changes; see docs/dev-loop.md for the pull-request preflight vs merge-queue split.
+
+Connecting a gateway
+
+Gateway details are user-supplied. Hermes Fleet does not ship with a maintainer endpoint or shared credentials. Prefer TLS-protected endpoints, especially outside trusted local networks.
+
+See docs/gateway-pairing.md for manual and QR-assisted setup.
+
+Documentation
+
+Start with docs/README.md.
+
+docs/architecture.md - module boundaries, data flow, and architectural constraints
+docs/features.md - current feature surfaces and important limitations
+docs/navigation.md - top-level destinations, ownership model, and restoration
+docs/gateway-pairing.md - gateway setup and QR pairing
+docs/adr/ - architectural decision records
+CONTRIBUTING.md - development and pull request guidance
+SECURITY.md - security model and vulnerability reporting
+Security
+
+Credentials belong in the platform Keychain, not source, logs, screenshots, fixtures, or documentation. Gateway endpoints are treated as origins and sensitive URL material is rejected or redacted at trust boundaries.
+
+Please report vulnerabilities privately according to SECURITY.md.
+
+License
+
+Hermes Fleet is available under the MIT License.
+
+About
+
+Native iPhone control plane for user-owned Hermes Agent fleets.
+
+Topics
+ai-agents
+fleet-management
+hermes-agent
+ios
+iphone
+swift
+swift-6
+swiftui
+Resources
+Readme
+MIT license
+Contributing
+Contributing
+Security policy
+Security policy
+Activity
+Custom properties
+Stars
+23 stars
+Watchers
+0 watching
+Forks
+3 forks
+Report repository
+Releases
+Packages
+Contributors
+Languages
+Footer
+© 2026 GitHub, Inc.
+Footer navigation
+Terms
+Privacy
+Security
+Status
+Community
+Docs
+Contact
+Manage cookies
+Do not share my personal information
+ 

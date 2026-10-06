@@ -16,7 +16,7 @@ export interface JsonRpcEvent {
 
 export interface JsonRpcFrame {
   jsonrpc?: string;
-  id?: number;
+  id?: number | string;
   method?: string;
   params?: JsonValue;
   result?: JsonValue;
@@ -26,11 +26,26 @@ export interface JsonRpcFrame {
   [key: string]: JsonValue | undefined | { code?: number; message?: string; data?: JsonValue };
 }
 
+export class JsonRpcError extends Error {
+  constructor(message: string, public readonly code?: number, public readonly data?: JsonValue) {
+    super(message);
+    this.name = 'JsonRpcError';
+  }
+}
+
 export class JsonRpcPeer {
   private nextId = 1;
   private pending = new Map<number, { resolve: (value: JsonValue) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(private readonly socket: WebSocket, private readonly timeoutMs = 30_000) {}
+
+  respond(id: string, result: Record<string, JsonValue>): void {
+    this.socket.send(JSON.stringify({ jsonrpc: '2.0', id, result }));
+  }
+
+  respondError(id: string, code: number, message: string): void {
+    this.socket.send(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }));
+  }
 
   request(method: string, params: JsonValue = {}, options: { timeoutMs?: number } = {}): Promise<JsonValue> {
     const id = this.nextId++;
@@ -54,14 +69,19 @@ export class JsonRpcPeer {
       this.pending.delete(frame.id);
       if (frame.error) {
         const message = typeof frame.error === 'string' ? frame.error : frame.error.message ?? 'JSON-RPC error';
-        waiter.reject(new Error(message));
+        waiter.reject(new JsonRpcError(message, typeof frame.error === 'object' ? frame.error.code : undefined, typeof frame.error === 'object' ? frame.error.data : undefined));
       } else {
         waiter.resolve(frame.result ?? null);
       }
       return null;
     }
     if (frame.method && typeof frame.params === 'object' && frame.params !== null && !Array.isArray(frame.params)) {
-      return { ...(frame.params as Record<string, JsonValue>), type: frame.method };
+      const params = frame.params as Record<string, JsonValue>;
+      return {
+        ...params,
+        type: typeof params.type === 'string' ? params.type : frame.method,
+        ...(typeof frame.id === 'string' ? { server_request_id: frame.id } : {}),
+      };
     }
     if (frame.type) return frame as JsonRpcEvent;
     return null;

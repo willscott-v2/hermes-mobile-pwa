@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeServerUrl, endpointUrl, eventToMessages, HermesApiClient, normalizeHistoryMessages, redactForLog, wsUrl } from './hermesApi';
+import { resumeResultFromPayload, shouldDeclineOnPhone, clarifyServerRequestResult, approvalActionAvailability, approvalResponseParams, attentionFromEvent, clarifyResponseParams, pendingAttentionEvents, queueOutcomeFromResult, queuePromptParams, steerOutcomeFromError, steerOutcomeFromResult, steerParams, updateAttentionFromEvent, normalizeServerUrl, endpointUrl, eventToMessages, HermesApiClient, normalizeHistoryMessages, redactForLog, wsUrl } from './hermesApi';
+import { JsonRpcError } from './jsonRpc';
 
  describe('normalizeServerUrl', () => {
   it('defaults host:port to http and removes trailing slash', () => {
@@ -49,65 +50,17 @@ describe('history normalization', () => {
       ['assistant', 'Done.'],
     ]);
   });
-});
 
-
-describe('connection diagnostics and runtime catalog', () => {
-  it('diagnoses a healthy password dashboard without persisting a password', async () => {
-    const requests: string[] = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      requests.push(url);
-      if (url.endsWith('/api/status')) return new Response(JSON.stringify({ version: 'test', auth_required: true, gateway_running: true }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (url.endsWith('/api/auth/providers')) return new Response(JSON.stringify({ providers: [{ name: 'local', display_name: 'Local', supports_password: true }] }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (url.endsWith('/auth/password-login')) return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (url.endsWith('/api/auth/ws-ticket')) return new Response(JSON.stringify({ ticket: 'ticket-1' }), { status: 200, headers: { 'content-type': 'application/json' } });
-      return new Response('{}', { status: 404 });
-    }) as typeof fetch;
-    try {
-      const client = new HermesApiClient('https://agent.example/hermes');
-      const result = await client.diagnoseConnection({ mode: 'password', username: 'will', password: 'secret' });
-
-      expect(result.ok).toBe(true);
-      expect(result.steps.map((step) => step.state)).toEqual(['passed', 'passed', 'passed', 'passed', 'passed']);
-      expect(JSON.stringify(result)).not.toContain('secret');
-      expect(requests.some((url) => url.endsWith('/api/auth/ws-ticket'))).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('diagnoses likely wrong PWA URL when status route returns html', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response('<!doctype html><div id="root"></div>', { status: 200, headers: { 'content-type': 'text/html' } })) as typeof fetch;
-    try {
-      const client = new HermesApiClient('https://agent.example');
-      const result = await client.diagnoseConnection({ mode: 'password', username: '', password: '' });
-      expect(result.ok).toBe(false);
-      expect(result.steps.find((step) => step.id === 'status')?.issue).toBe('wrong-pwa-url');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('loads runtime catalog from optional dashboard endpoints', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/api/profiles')) return new Response(JSON.stringify({ profiles: ['default', 'research'] }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (url.endsWith('/api/projects')) return new Response(JSON.stringify({ projects: [{ id: 'pwa', name: 'PWA' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
-      if (url.endsWith('/api/models')) return new Response(JSON.stringify({ models: [{ id: 'm1', label: 'Model 1' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
-      return new Response('{}', { status: 404 });
-    }) as typeof fetch;
-    try {
-      const catalog = await new HermesApiClient('https://agent.example/hermes').runtimeCatalog({ mode: 'password' });
-      expect(catalog.profiles.map((profile) => profile.id)).toContain('research');
-      expect(catalog.projects[0]).toEqual({ id: 'pwa', label: 'PWA' });
-      expect(catalog.models[0]).toEqual({ id: 'm1', label: 'Model 1' });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+  it('drops display_kind hidden rows from history normalization', () => {
+    const messages = normalizeHistoryMessages([
+      { role: 'user', content: 'visible question', display_kind: 'visible' },
+      { role: 'assistant', content: 'hidden internal', display_kind: 'hidden' },
+      { role: 'assistant', content: 'shown', display_kind: 'visible' },
+    ]);
+    expect(messages.map((message) => [message.role, message.text])).toEqual([
+      ['user', 'visible question'],
+      ['assistant', 'shown'],
+    ]);
   });
 });
 
@@ -168,7 +121,233 @@ describe('history API transcript fetching', () => {
 });
 
 
+
+describe('updateAttentionFromEvent', () => {
+  it('clears only the matching expired attention request', () => {
+    const current = { kind: 'clarify' as const, requestId: 'req-1', title: 'Hermes needs an answer', detail: 'Pick one' };
+    expect(updateAttentionFromEvent(current, { type: 'clarify.expire', payload: { request_id: 'req-other' } })).toEqual(current);
+    expect(updateAttentionFromEvent(current, { type: 'clarify.expire', payload: { request_id: 'req-1' } })).toBeNull();
+  });
+
+  it('clears a restored server request when the gateway cancels it', () => {
+    const current = { kind: 'clarify' as const, serverRequestId: 'srq-1', title: 'Hermes needs an answer', detail: 'Pick one' };
+    expect(updateAttentionFromEvent(current, {
+      type: 'request.cancel',
+      payload: { id: 'srq-1', method: 'clarify', reason: 'resolved' },
+    })).toBeNull();
+  });
+});
+
+describe('pendingAttentionEvents', () => {
+  it('replays a pending clarify snapshot returned by session.resume', () => {
+    expect(pendingAttentionEvents({
+      pending_clarify: { request_id: 'req-resume', question: 'Resume where?', choices: ['here', 'later'] },
+    })).toEqual([{
+      type: 'clarify.request',
+      payload: { request_id: 'req-resume', question: 'Resume where?', choices: ['here', 'later'] },
+    }]);
+  });
+
+  it('replays an explicit pending snapshot without a request id as a disabled fallback', () => {
+    expect(pendingAttentionEvents({
+      pending_approval: { description: 'A command is still waiting.' },
+    })).toEqual([{
+      type: 'approval.request',
+      payload: { description: 'A command is still waiting.' },
+    }]);
+  });
+
+  it('does not invent sensitive pending input from a running resume snapshot', () => {
+    expect(pendingAttentionEvents({
+      session_id: 'runtime-session',
+      running: true,
+      inflight: { role: 'assistant', tool_calls: [{ function: { name: 'terminal' } }] },
+    })).toEqual([]);
+  });
+
+  it('replays the current gateway open_requests snapshot as an honest fallback', () => {
+    expect(pendingAttentionEvents({
+      open_requests: [{
+        id: 'srq-resume',
+        method: 'clarify',
+        params: { session_id: 'runtime-session', question: 'Which region?', choices: ['US', 'EU'] },
+      }],
+    })).toEqual([{
+      type: 'clarify',
+      server_request_id: 'srq-resume',
+      session_id: 'runtime-session',
+      question: 'Which region?',
+      choices: ['US', 'EU'],
+    }]);
+  });
+});
+
+describe('approvalResponseParams', () => {
+  it('targets one approval request without enabling approve-all', () => {
+    expect(approvalResponseParams('session-1', 'request-1', 'once')).toEqual({
+      session_id: 'session-1',
+      request_id: 'request-1',
+      choice: 'once',
+      all: false,
+    });
+  });
+});
+
+describe('approvalActionAvailability', () => {
+  it('does not offer approve once when the gateway omits that choice', () => {
+    expect(approvalActionAvailability({
+      kind: 'approval',
+      requestId: 'request-deny-only',
+      title: 'Approval needed',
+      detail: 'This command can only be denied here.',
+      choices: ['deny'],
+    })).toEqual({ approveOnce: false, deny: true });
+  });
+
+  it('offers advertised actions for a current-protocol server request', () => {
+    expect(approvalActionAvailability({
+      kind: 'approval',
+      serverRequestId: 'srq-approval',
+      title: 'Approval needed',
+      detail: 'Run the command?',
+      choices: ['once', 'deny'],
+    })).toEqual({ approveOnce: true, deny: true });
+  });
+});
+
+describe('clarifyResponseParams', () => {
+  it('targets the unanswered question in a restored clarify batch', () => {
+    expect(clarifyResponseParams('session-1', 'request-1', 'Yes', 'q1')).toEqual({
+      session_id: 'session-1',
+      request_id: 'request-1',
+      question_id: 'q1',
+      answer: 'Yes',
+    });
+  });
+});
+
+describe('attentionFromEvent', () => {
+  it('normalizes a clarify request into a compact attention model', () => {
+    expect(attentionFromEvent({
+      type: 'clarify.request',
+      payload: { request_id: 'req-clarify', question: 'Which environment?', choices: ['staging', 'production'] },
+    })).toEqual({
+      kind: 'clarify',
+      requestId: 'req-clarify',
+      title: 'Hermes needs an answer',
+      detail: 'Which environment?',
+      choices: ['staging', 'production'],
+    });
+  });
+
+  it('shows a current-protocol server request without enabling legacy response actions', () => {
+    expect(attentionFromEvent({
+      type: 'clarify',
+      server_request_id: 'srq-live',
+      session_id: 'runtime-session',
+      question: 'Which environment?',
+      choices: ['staging', 'production'],
+    })).toEqual({
+      kind: 'clarify',
+      serverRequestId: 'srq-live',
+      title: 'Hermes needs an answer',
+      detail: 'Which environment?',
+      choices: ['staging', 'production'],
+    });
+  });
+
+  it('preserves a free-text clarify request for a custom mobile answer', () => {
+    expect(attentionFromEvent({
+      type: 'clarify.request',
+      payload: { request_id: 'req-free-text', question: 'Which deployment label?' },
+    })).toEqual({
+      kind: 'clarify',
+      requestId: 'req-free-text',
+      title: 'Hermes needs an answer',
+      detail: 'Which deployment label?',
+      freeText: true,
+    });
+  });
+
+  it('marks multi-select clarify requests as unavailable for single-tap submission', () => {
+    expect(attentionFromEvent({
+      type: 'clarify.request',
+      payload: { request_id: 'req-multi', question: 'Which regions?', choices: ['US', 'EU'], multi_select: true },
+    })).toEqual({
+      kind: 'clarify',
+      requestId: 'req-multi',
+      title: 'Hermes needs an answer',
+      detail: 'Which regions?',
+      choices: ['US', 'EU'],
+      multiSelect: true,
+    });
+  });
+
+  it('summarizes a restored batch clarify snapshot without exposing raw JSON', () => {
+    expect(attentionFromEvent({
+      type: 'clarify.request',
+      payload: {
+        request_id: 'req-batch',
+        questions: [
+          { qid: 'q0', question: 'Color?', choices: ['Blue', 'Red'] },
+          { qid: 'q1', question: 'Size?', choices: ['Small', 'Large'] },
+        ],
+        answers: { q0: 'Blue' },
+      },
+    })).toEqual({
+      kind: 'clarify',
+      requestId: 'req-batch',
+      questionId: 'q1',
+      title: 'Hermes needs an answer',
+      detail: 'Color? (answered: Blue) · Size? (Small / Large)',
+      choices: ['Small', 'Large'],
+    });
+  });
+
+  it('preserves multi-select on the one unanswered question in a restored batch', () => {
+    expect(attentionFromEvent({
+      type: 'clarify.request',
+      payload: {
+        request_id: 'req-batch-multi',
+        questions: [{ qid: 'q0', question: 'Regions?', choices: ['US', 'EU'], multi_select: true }],
+      },
+    })).toMatchObject({
+      kind: 'clarify',
+      requestId: 'req-batch-multi',
+      questionId: 'q0',
+      choices: ['US', 'EU'],
+      multiSelect: true,
+    });
+  });
+
+  it('includes the client-safe command in a restored approval summary', () => {
+    expect(attentionFromEvent({
+      type: 'approval.request',
+      payload: {
+        request_id: 'req-approval',
+        description: 'Deploy the preview build?',
+        command: 'npm run deploy -- --preview',
+        choices: ['once', 'deny'],
+      },
+    })).toEqual({
+      kind: 'approval',
+      requestId: 'req-approval',
+      title: 'Approval needed',
+      detail: 'Deploy the preview build? · Command: npm run deploy -- --preview',
+      choices: ['once', 'deny'],
+    });
+  });
+});
+
 describe('eventToMessages', () => {
+  it('keeps blocking input events out of the transcript', () => {
+    const existing = [{ id: 'a1', role: 'assistant' as const, text: 'Main answer', state: 'complete' as const }];
+    expect(eventToMessages({
+      type: 'approval.request',
+      payload: { request_id: 'req-approval', description: 'Run a command?' },
+    }, existing)).toEqual(existing);
+  });
+
   it('removes transient thinking status when an assistant message completes', () => {
     const started = eventToMessages({ type: 'message.start' }, []);
     const streamed = eventToMessages({ type: 'message.delta', delta: 'done' }, started);
@@ -198,5 +377,265 @@ describe('eventToMessages', () => {
     expect(messages.map((message) => [message.role, message.text])).toEqual([
       ['assistant', 'I checked the logs.'],
     ]);
+  });
+});
+
+describe('sessionHistoryPage', () => {
+  it('builds a backward-paginated messages URL with limit/offset/order/profile', async () => {
+    const seen: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      seen.push(url);
+      return new Response(
+        JSON.stringify({
+          session_id: 'sess-1',
+          profile: 'ops',
+          messages: [
+            { id: 1, role: 'user', content: 'hello' },
+            { id: 2, role: 'assistant', content: 'hi' },
+          ],
+          pagination: { limit: 50, offset: 100, order: 'latest', returned: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      await new HermesApiClient('https://agent.example/hermes')
+        .sessionHistoryPage({ mode: 'password' }, { id: 'sess-1', profile: 'ops' }, { limit: 50, offset: 100 });
+      expect(seen[0]).toContain('order=latest');
+      expect(seen[0]).toContain('limit=50');
+      expect(seen[0]).toContain('offset=100');
+      expect(seen[0]).toContain('profile=ops');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('marks reachedBeginning false when pagination.returned equals limit and true when smaller', async () => {
+    const originalFetch = globalThis.fetch;
+    let returned = 50;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          session_id: 'sess-1',
+          messages: Array.from({ length: 50 }, (_, index) => ({ id: index + 1, role: 'user', content: `m${index}` })),
+          pagination: { returned },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const client = new HermesApiClient('https://agent.example/hermes');
+      const full = await client.sessionHistoryPage({ mode: 'password' }, { id: 'sess-1' }, { limit: 50, offset: 0 });
+      expect(full.reachedBeginning).toBe(false);
+      returned = 3;
+      const partial = await client.sessionHistoryPage({ mode: 'password' }, { id: 'sess-1' }, { limit: 50, offset: 50 });
+      expect(partial.reachedBeginning).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('reports returned from pagination while filtering a compacted tool row', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          session_id: 'sess-1',
+          messages: [
+            { id: 1, role: 'user', content: 'question' },
+            { id: 2, role: 'assistant', content: 'answer' },
+            { id: 3, role: 'assistant', content: 'tool output was saved', tool_name: 'terminal', tool_call_id: 'call_1' },
+          ],
+          pagination: { returned: 3 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const page = await new HermesApiClient('https://agent.example/hermes')
+        .sessionHistoryPage({ mode: 'password' }, { id: 'sess-1' }, { limit: 50, offset: 0 });
+      expect(page.returned).toBe(3);
+      expect(page.messages.length).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('drops display_kind hidden rows and renders display_content', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          session_id: 'sess-1',
+          messages: [
+            { id: 1, role: 'user', content: 'secret hidden', display_kind: 'hidden' },
+            { id: 2, role: 'assistant', content: 'should-be-replaced', display_content: 'shown' },
+          ],
+          pagination: { returned: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const page = await new HermesApiClient('https://agent.example/hermes')
+        .sessionHistoryPage({ mode: 'password' }, { id: 'sess-1' }, { limit: 50, offset: 0 });
+      expect(page.messages.length).toBe(1);
+      expect(page.messages[0].text).toBe('shown');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('derives stable ids from raw id and falls back to index-based ids', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          session_id: 'sess-1',
+          messages: [
+            { id: 41, role: 'user', content: 'question forty-one' },
+            { role: 'assistant', content: 'answer without id' },
+          ],
+          pagination: { returned: 2 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const page = await new HermesApiClient('https://agent.example/hermes')
+        .sessionHistoryPage({ mode: 'password' }, { id: 'sess-1' }, { limit: 50, offset: 0 });
+      expect(page.messages[0].id).toBe('history-41');
+      expect(page.messages[1].id.startsWith('history-')).toBe(true);
+      expect(page.messages[1].id).toContain('1');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('clamps limit to 500 and offset to 0', async () => {
+    const seen: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      seen.push(url);
+      return new Response(
+        JSON.stringify({
+          session_id: 'sess-1',
+          messages: [],
+          pagination: { returned: 0 },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const page = await new HermesApiClient('https://agent.example/hermes')
+         .sessionHistoryPage({ mode: 'password' }, { id: 'sess-1' }, { limit: 9999, offset: -5 });
+      expect(seen[0]).toContain('limit=500');
+      expect(seen[0]).toContain('offset=0');
+      expect(page.reachedBeginning).toBe(true);
+      } finally {
+      globalThis.fetch = originalFetch;
+      }
+    });
+});
+
+describe('running-turn input helpers', () => {
+  it('queuePromptParams marks the submission queued', () => {
+    expect(queuePromptParams('session-1', 'do the thing')).toEqual({
+      session_id: 'session-1',
+      text: 'do the thing',
+      queued: true,
+     });
+   });
+
+  it('steerParams omits profile unless provided', () => {
+    expect(steerParams('session-1', 'focus on X')).toEqual({
+      session_id: 'session-1',
+      text: 'focus on X',
+     });
+    expect(steerParams('session-1', 'focus on X', 'main')).toEqual({
+      session_id: 'session-1',
+      text: 'focus on X',
+      profile: 'main',
+     });
+   });
+
+  it('queueOutcomeFromResult maps queued and streaming, unknown otherwise', () => {
+    expect(queueOutcomeFromResult({ status: 'queued' })).toEqual({ status: 'queued' });
+    expect(queueOutcomeFromResult({ status: 'streaming' })).toEqual({ status: 'streaming' });
+    expect(queueOutcomeFromResult({ status: 'idle' })).toEqual({ status: 'unknown', raw: 'idle' });
+   });
+
+  it('steerOutcomeFromResult maps queued to accepted, rejected to rejected, unknown otherwise', () => {
+    expect(steerOutcomeFromResult({ status: 'queued' })).toEqual({ status: 'accepted' });
+    expect(steerOutcomeFromResult({ status: 'rejected' })).toEqual({ status: 'rejected' });
+    expect(steerOutcomeFromResult({ status: 'nope' })).toEqual({ status: 'unknown', raw: 'nope' });
+   });
+
+  it('steerOutcomeFromError returns unsupported for code 4010 and null otherwise', () => {
+    expect(steerOutcomeFromError(new JsonRpcError('no steer support', 4010))).toEqual({ status: 'unsupported' });
+    expect(steerOutcomeFromError(new Error('boom'))).toBeNull();
+    expect(steerOutcomeFromError(new JsonRpcError('empty text', 4002))).toBeNull();
+   });
+});
+
+describe('eventToMessages with installed-gateway nested payloads', () => {
+  it('streams delta text from payload.text and finalizes from payload.text', () => {
+    let messages = eventToMessages({ type: 'message.start', session_id: 's' }, []);
+    messages = eventToMessages({ type: 'message.delta', session_id: 's', payload: { text: 'PWA-R1-' } }, messages);
+    messages = eventToMessages({ type: 'message.delta', session_id: 's', payload: { text: 'OK' } }, messages);
+    expect(messages.at(-1)).toMatchObject({ role: 'assistant', state: 'streaming', text: 'PWA-R1-OK' });
+    messages = eventToMessages({ type: 'message.complete', session_id: 's', payload: { text: 'PWA-R1-OK', status: 'complete' } }, messages);
+    expect(messages.filter((m) => m.role === 'assistant')).toHaveLength(1);
+    expect(messages.at(-1)).toMatchObject({ role: 'assistant', state: 'complete', text: 'PWA-R1-OK' });
+  });
+
+  it('still accepts legacy flat delta/text fields', () => {
+    const messages = eventToMessages({ type: 'message.delta', delta: 'hi' }, []);
+    expect(messages.at(-1)?.text).toBe('hi');
+  });
+
+  it('renders status.update text and hides heartbeat kinds', () => {
+    const shown = eventToMessages({ type: 'status.update', payload: { kind: 'process', text: 'Running tests…' } }, []);
+    expect(shown.at(-1)).toMatchObject({ role: 'status', text: 'Running tests…', meta: 'process' });
+    const hidden = eventToMessages({ type: 'status.update', payload: { kind: 'heartbeat', text: '♥ heartbeat #3 firing…' } }, []);
+    expect(hidden).toHaveLength(0);
+  });
+});
+
+describe('resumeResultFromPayload keeps live and stored ids distinct', () => {
+  it('maps session_id to the live id and session_key to the stored id', () => {
+    const result = resumeResultFromPayload({ session_id: 'live-7', session_key: '20261006-abc', running: true, status: 'streaming' }, 'requested', []);
+    expect(result).toMatchObject({ sessionId: 'live-7', storedId: '20261006-abc', running: true, status: 'streaming', openRequestKeys: [] });
+  });
+  it('falls back to the requested id when the payload has neither', () => {
+    expect(resumeResultFromPayload({}, 'requested', [])).toMatchObject({ sessionId: 'requested', storedId: 'requested', running: false });
+  });
+});
+
+describe('shouldDeclineOnPhone', () => {
+  it('declines sudo/secret/multi-select server requests and keeps answerable ones', () => {
+    expect(shouldDeclineOnPhone({ kind: 'sudo', serverRequestId: 's1', title: 't', detail: 'd' })).toBe(true);
+    expect(shouldDeclineOnPhone({ kind: 'secret', serverRequestId: 's2', title: 't', detail: 'd' })).toBe(true);
+    expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's3', title: 't', detail: 'd', choices: ['A', 'B'], multiSelect: true })).toBe(true);
+    expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's4', questionId: 'q0', title: 't', detail: 'd', choices: ['A', 'B'] })).toBe(false);
+    expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's5', questionId: 'q0', title: 't', detail: 'd', freeText: true })).toBe(false);
+    expect(shouldDeclineOnPhone({ kind: 'approval', serverRequestId: 's6', title: 't', detail: 'd', choices: ['once', 'deny'] })).toBe(false);
+    expect(shouldDeclineOnPhone({ kind: 'approval', serverRequestId: 's7', title: 't', detail: 'd', choices: ['always'] })).toBe(true);
+  });
+  it('never declines legacy requests without a server request id', () => {
+    expect(shouldDeclineOnPhone({ kind: 'sudo', requestId: 'legacy', title: 't', detail: 'd' })).toBe(false);
+  });
+});
+
+describe('clarifyServerRequestResult', () => {
+  it('answers the installed gateway contract: { answers: { [qid]: answer } }', () => {
+    expect(clarifyServerRequestResult('q0', 'Beta')).toEqual({ answers: { q0: 'Beta' } });
+  });
+  it('a current-protocol clarify without a qid is declined on the phone', () => {
+    expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's', title: 't', detail: 'd', choices: ['A'] })).toBe(true);
+    expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's', questionId: 'q0', title: 't', detail: 'd', choices: ['A'] })).toBe(false);
   });
 });

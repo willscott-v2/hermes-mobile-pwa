@@ -1,0 +1,66 @@
+{
+  "text": "HERMES MOBILE\nConnect\nidle\nYour agent, pocket-sized.\n\nConnect to a private Hermes dashboard and drive real sessions from a phone-friendly UI.\n\nMode\nPassword\nHermes URL\nUsername\nPassword\nCheck server\nConnect\nCouldn\u2019t restore dashboard session. Sign in to continue.\nPasswords are never persisted. Use Tailscale/VPN; do not expose Hermes publicly.",
+  "overflow": 0,
+  "controls": [
+    {
+      "tag": "BUTTON",
+      "type": "button",
+      "label": "Password",
+      "font": "13px",
+      "rect": {
+        "width": 358,
+        "height": 48
+      }
+    },
+    {
+      "tag": "INPUT",
+      "type": "text",
+      "label": "http://mac.tailnet:9119",
+      "font": "13px",
+      "rect": {
+        "width": 358,
+        "height": 48
+      }
+    },
+    {
+      "tag": "INPUT",
+      "type": "text",
+      "label": "",
+      "font": "13px",
+      "rect": {
+        "width": 175,
+        "height": 48
+      }
+    },
+    {
+      "tag": "INPUT",
+      "type": "password",
+      "label": "",
+      "font": "13px",
+      "rect": {
+        "width": 175,
+        "height": 48
+      }
+    },
+    {
+      "tag": "BUTTON",
+      "type": "button",
+      "label": "Check server",
+      "font": "16px",
+      "rect": {
+        "width": 174,
+        "height": 48
+      }
+    },
+    {
+      "tag": "BUTTON",
+      "type": "submit",
+      "label": "Connect",
+      "font": "16px",
+      "rect": {
+        "width": 174,
+        "height": 48
+      }
+    }
+  ]
+}

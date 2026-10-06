@@ -1,0 +1,28 @@
+Command: date -Iseconds && npm run check:daily && git diff --check && git diff --exit-code -- src public scripts package.json package-lock.json index.html vite.config.ts tsconfig.json playwright.config.ts && git status --short --branch
+
+2026-10-06T10:36:52-05:00
+
+> hermes-mobile-pwa@0.1.0 check:daily
+> node scripts/daily-functional-check.mjs
+
+Daily Hermes Mobile functional check: https://<tailnet-host>:8447
+{
+  "ok": true,
+  "baseURL": "https://<tailnet-host>:8447",
+  "requiredPlatforms": [
+    "photon"
+  ],
+  "liveWebSocket": "skipped",
+  "gatewayState": "running",
+  "overall": "ok",
+  "failures": [],
+  "warnings": [
+    "live websocket check skipped: set HERMES_MOBILE_CHECK_USERNAME/PASSWORD or HERMES_MOBILE_CHECK_TOKEN to test the authenticated gateway socket"
+  ]
+}
+## main
+ M docs/FEATURE_WISHLIST.md
+?? docs/HANDOFF_ASTRA_MOBILE_PWA_RESEARCH.md
+?? docs/plans/
+?? docs/research/
+Exit code: 0

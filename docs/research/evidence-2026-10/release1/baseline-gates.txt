@@ -1,0 +1,77 @@
+== baseline Tue Oct  6 11:47:47 CDT 2026
+== check:daily
+
+> hermes-mobile-pwa@0.1.0 check:daily
+> node scripts/daily-functional-check.mjs
+
+Daily Hermes Mobile functional check: https://<tailnet-host>:8447
+{
+  "ok": true,
+  "baseURL": "https://<tailnet-host>:8447",
+  "requiredPlatforms": [
+    "photon"
+  ],
+  "liveWebSocket": "skipped",
+  "gatewayState": "running",
+  "overall": "ok",
+  "failures": [],
+  "warnings": [
+    "live websocket check skipped: set HERMES_MOBILE_CHECK_USERNAME/PASSWORD or HERMES_MOBILE_CHECK_TOKEN to test the authenticated gateway socket"
+  ]
+}
+== test
+
+> hermes-mobile-pwa@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.10 <home>/clawd/projects/hermes-mobile-pwa
+
+
+ Test Files  3 passed (3)
+      Tests  37 passed (37)
+   Start at  11:47:49
+   Duration  120ms (transform 68ms, setup 0ms, import 86ms, tests 19ms, environment 0ms)
+
+== typecheck
+
+> hermes-mobile-pwa@0.1.0 typecheck
+> tsc -b --pretty false
+
+== build
+[2K
+transforming...✓ 1789 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.96 kB │ gzip:  0.44 kB
+dist/assets/index-BasYsOo5.css   13.01 kB │ gzip:  3.42 kB
+dist/assets/index-DU3bNYKj.js   246.70 kB │ gzip: 77.84 kB
+
+✓ built in 139ms
+== smoke
+
+> hermes-mobile-pwa@0.1.0 smoke
+> node scripts/smoke.mjs
+
+Smoke OK: dist app shell is present.
+== e2e
+  ✓  18 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:320:1 › current-protocol approval can be answered from the mobile card (305ms)
+  ✓  19 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:332:1 › restored approval without a request id stays visible as a disabled fallback (256ms)
+  ✓  20 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:356:1 › secret request event uses a compact secure fallback without exposing the environment key (256ms)
+  ✓  21 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:382:1 › sudo request event uses a compact secure fallback without exposing password entry (277ms)
+  ✓  22 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:407:1 › chat composer and transcript controls keep touch-friendly targets (314ms)
+  ✓  23 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:426:1 › chat header truncates long session titles without crowding the status pill (311ms)
+  ✓  24 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:454:1 › mobile transcript keeps URLs clickable while cleaning markdown punctuation (287ms)
+  ✓  25 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:466:1 › document attachment selection shows a compact chip and sends only after upload succeeds (311ms)
+  ✓  26 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:501:1 › chat composer grows for multiline prompts without covering the transcript (281ms)
+  ✓  27 [mobile-chromium] › tests/e2e/mobile-layout.spec.ts:526:1 › send button is disabled while a prompt submit is running (324ms)
+
+  27 passed (7.6s)
+== scan
+docs/research/evidence-2026-10/release1/baseline-gates.txt: private Tailnet hostname
+docs/research/evidence-2026-10/release1/baseline-gates.txt: local user path
+docs/research/evidence-2026-10/verification-final.txt: private Tailnet hostname
+docs/research/evidence-2026-10/verification-recheck.txt: private Tailnet hostname
+docs/research/evidence-2026-10/verification-recheck.txt: local user path
+== diffcheck
+DIFFCHECK_OK

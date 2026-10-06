@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": 1,
+      "url": "https://help.openai.com/en/articles/11752874-chatgpt-agent",
+      "title": "",
+      "accessed": "2026-10-06"
+    },
+    {
+      "id": 2,
+      "url": "https://code.claude.com/docs/en/remote-control",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Survive interruptions: if your laptop sleeps or your network drops, Claude Code reconnects automatically when your machine comes back online.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "url": "https://code.claude.com/docs/en/mobile",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "The Claude app for iOS and Android is a client for Claude Code sessions rather than a place where code runs.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "url": "https://linear.app/mobile",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "The inbox keeps you informed about high-priority tasks and projects that need your attention.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "url": "https://linear.app/docs/notifications",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Linear does not currently support setting up new browser push-notification subscriptions.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "url": "https://hermesconduit.app",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Return to your conversations and switch between the profiles you already use.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "url": "https://github.com/AIowa-LLC/hermes-fleet",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Unknown never renders as zero.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "url": "https://vory.dev",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Thinking becomes a heavier pebble.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "url": "https://bighelp.app",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Agents reply with cards and forms, so choosing is one touch.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "url": "https://hermexapp.com",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "It isn’t the dashboard that comes with Hermes Agent — Hermex needs hermes-webui.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "url": "https://cadu.bot",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "Connect your Hermes instance with a QR code or connection link.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "url": "https://support.google.com/gemini/answer/15274899?hl=en",
+      "title": "",
+      "accessed": "2026-10-06"
+    },
+    {
+      "id": 13,
+      "url": "https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "On narrow screens it folds into a slide-over panel.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "url": "https://web.archive.org/web/20261003080135/https://help.openai.com/en/articles/11752874-chatgpt-agent",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "ChatGPT agent is no longer available.",
+          "added": "2026-10-06"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "url": "https://support.google.com/gemini/answer/15274899?hl=en&co=GENIE.Platform%3DiOS",
+      "title": "",
+      "accessed": "2026-10-06",
+      "quotes": [
+        {
+          "text": "For now, Gemini Live isn’t available in the Gemini web app.",
+          "added": "2026-10-06"
+        }
+      ]
+    }
+  ]
+}
