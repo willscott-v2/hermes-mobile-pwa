@@ -43,6 +43,7 @@ const APP_KEYS = [
   'hermes-mobile-pwa.token',
   'hermes-mobile-pwa.server-url',
   'hermes-mobile-pwa.login-hint',
+  'hermes-mobile-pwa.active-profile.v1',
   'hermes-mobile-pwa.sessions-cache.v1',
   'hermes-mobile-pwa.last-session-id',
 ];
@@ -201,5 +202,64 @@ describe('retired session cache and last-session key', () => {
     const storage = await loadStorage();
     storage.saveLastSessionId('abc');
     expect(storage.loadLastSessionId()).toBe('');
-  });
+    });
+});
+
+describe('active profile preference (host-scoped, minimal)', () => {
+  it('round-trips a preferred profile for the same host and base path', async () => {
+    const storage = await loadStorage();
+    storage.saveActiveProfile('https://host:9119', '/hermes', 'sales-test');
+    expect(storage.loadActiveProfile('https://host:9119', '/hermes')).toBe('sales-test');
+    expect(storage.loadActiveProfile('https://host:9119', '/hermes')).toBe('sales-test');
+     });
+
+  it('is host-scoped: another origin or base path reads nothing (remembered scope mismatch)', async () => {
+    const storage = await loadStorage();
+    storage.saveActiveProfile('https://host:9119', '/hermes', 'sales-test');
+    expect(storage.loadActiveProfile('https://other:9119', '/hermes')).toBeNull();
+    expect(storage.loadActiveProfile('https://host:9119', '/other')).toBeNull();
+    expect(storage.loadActiveProfile('https://host:9119', '')).toBeNull();
+     });
+
+  it('refuses to persist a blank profile, overwriting a saved value, or a non-http origin', async () => {
+    const storage = await loadStorage();
+    storage.saveActiveProfile('https://host:9119', '/hermes', 'sales-test');
+    storage.saveActiveProfile('https://host:9119', '/hermes', '   ');
+    storage.saveActiveProfile('https://host:9119', '/hermes', '');
+    storage.saveActiveProfile('ftp://host', '/hermes', 'ops');
+     // A refused write must never clobber the previously saved value.
+    expect(storage.loadActiveProfile('https://host:9119', '/hermes')).toBe('sales-test');
+    expect(storage.loadActiveProfile('ftp://host', '/hermes')).toBeNull();
+     });
+
+  it('is removed by forgetThisDevice and listed by appStorageKeys', async () => {
+    const storage = await loadStorage();
+    storage.saveActiveProfile('https://host:9119', '/hermes', 'sales-test');
+    expect(storage.appStorageKeys()).toContain('hermes-mobile-pwa.active-profile.v1');
+    storage.forgetThisDevice();
+    expect(storage.appStorageKeys()).not.toContain('hermes-mobile-pwa.active-profile.v1');
+    expect(storage.loadActiveProfile('https://host:9119', '/hermes')).toBeNull();
+     });
+
+  it('returns null and clears a corrupt/old-version stored value', async () => {
+    const storage = await loadStorage();
+    store.setItem('hermes-mobile-pwa.active-profile.v1', '{not json');
+    expect(storage.loadActiveProfile('https://host:9119', '/hermes')).toBeNull();
+    expect(store.getItem('hermes-mobile-pwa.active-profile.v1')).toBeNull();
+    store.setItem('hermes-mobile-pwa.active-profile.v1', JSON.stringify({ v: 1, origin: 'https://host:9119', basePath: '/hermes', profile: 'sales-test' }));
+    expect(storage.loadActiveProfile('https://host:9119', '/hermes')).toBeNull();
+     });
+
+  it('persists only a minimal, privacy-safe host-scoped value (no previews/messages)', async () => {
+    const storage = await loadStorage();
+    storage.saveActiveProfile('https://host:9119/hermes', '', 'sales-test');
+    const raw = store.getItem('hermes-mobile-pwa.active-profile.v1')!;
+    const parsed = JSON.parse(raw);
+    expect(parsed.origin).toBe('https://host:9119/hermes');
+    expect(parsed.basePath).toBe('');
+    expect(parsed.profile).toBe('sales-test');
+    expect(raw).not.toContain('preview');
+    expect(raw).not.toContain('message');
+    expect(raw).not.toContain('Jean');
+     });
 });

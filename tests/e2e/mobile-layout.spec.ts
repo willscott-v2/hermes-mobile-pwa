@@ -133,7 +133,7 @@ test('sessions screen has an independently scrollable session list', async ({ pa
   expect(metrics.scrollHeight).toBeGreaterThanOrEqual(metrics.clientHeight);
 });
 
-test('new chat sheet owns profile model and reasoning pickers', async ({ page }) => {
+test('new chat sheet locks the active profile and owns model and reasoning pickers', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 664 });
   await enableMock(page);
   await expect(page.getByRole('region', { name: 'New chat runtime controls' })).toHaveCount(0);
@@ -152,8 +152,9 @@ test('new chat sheet owns profile model and reasoning pickers', async ({ page })
   await expect(page.getByRole('button', { name: /Reasoning Inherit/ })).toBeVisible();
 
   await page.getByRole('button', { name: /Profile default/ }).click();
-  await page.getByRole('option', { name: 'sales-test' }).click();
-  await expect(page.getByRole('button', { name: /Profile sales-test/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'default' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'sales-test' })).toHaveCount(0);
+  await page.getByRole('option', { name: 'default' }).click();
 
   await page.getByRole('button', { name: /Model Mock Fast/ }).click();
   await page.getByRole('option', { name: 'Mock Deep' }).click();
@@ -165,7 +166,7 @@ test('new chat sheet owns profile model and reasoning pickers', async ({ page })
 
   await page.getByRole('button', { name: 'Start chat' }).click();
   await expect(page.getByRole('dialog', { name: 'New chat' })).toHaveCount(0);
-  await expect(page.getByText('Profile: sales-test · Model: mock/mock-deep · Reasoning: high')).toBeVisible();
+  await expect(page.getByText('Profile: default · Model: mock/mock-deep · Reasoning: high')).toBeVisible();
 });
 
 test('restored batch clarify renders as a compact mobile attention card without overflow', async ({ page }) => {
@@ -452,7 +453,7 @@ test('chat header truncates long session titles without crowding the status pill
   expect(metrics.pillRight).toBeLessThanOrEqual(metrics.viewportWidth);
 });
 
-test('mobile transcript keeps URLs clickable while cleaning markdown punctuation', async ({ page }) => {
+test('mobile transcript renders links, headings, lists, inline code, and fenced code', async ({ page }) => {
   await enableMock(page);
   await page.getByText('Weekend reading').click();
   const url = 'https://hermes.example.test/?v=23';
@@ -460,7 +461,10 @@ test('mobile transcript keeps URLs clickable while cleaning markdown punctuation
   const visibleText = await page.locator('.messages').innerText();
   expect(visibleText).not.toContain('**Refresh transcript**');
   expect(visibleText).not.toContain('```text');
+  expect(visibleText).toContain('Saved item');
   expect(visibleText).toContain('Then tap Refresh transcript.');
+  await expect(page.locator('.message-content code').filter({ hasText: 'inline code' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy code' })).toBeVisible();
   expect(visibleText).toContain('📎 filename.pdf');
 });
 

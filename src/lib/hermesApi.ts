@@ -300,7 +300,7 @@ export class HermesApiClient {
     return { mode: 'password', username };
   }
 
-  async sessionPage(auth: AuthSession, options: { limit?: number; offset?: number } = {}): Promise<SessionPage> {
+  async sessionPage(auth: AuthSession, options: { limit?: number; offset?: number; profile?: string } = {}): Promise<SessionPage> {
     const limit = options.limit ?? 75;
     const offset = options.offset ?? 0;
     const url = endpointUrl(this.baseUrl, '/api/sessions');
@@ -308,9 +308,14 @@ export class HermesApiClient {
     url.searchParams.set('offset', String(offset));
     url.searchParams.set('order', 'recent');
     url.searchParams.set('min_messages', '1');
+    const profile = options.profile?.trim();
+    if (profile) url.searchParams.set('profile', profile);
     const response = await this.get<{ sessions?: HermesSession[]; results?: HermesSession[]; total?: number; limit?: number; offset?: number }>(url, auth);
     return {
-      sessions: (response.sessions ?? response.results ?? []).map(normalizeSession),
+      sessions: (response.sessions ?? response.results ?? []).map((row) => {
+        const session = normalizeSession(row);
+        return session.profile || !profile ? session : { ...session, profile };
+      }),
       total: response.total,
       limit: response.limit ?? limit,
       offset: response.offset ?? offset,

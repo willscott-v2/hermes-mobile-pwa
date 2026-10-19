@@ -131,7 +131,11 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 }
 .status-pill.ok, .status-pill.tone-ok { color: #9ff0bf; } .status-pill.bad, .status-pill.tone-bad { color: #ffb7ac; }
 .status-pill.tone-busy { color: #ffd166; } .status-pill.tone-attention { color: #ffb000; border-color: rgba(255,176,0,.45); background: rgba(255,176,0,.12); }
-.sessions-screen { min-height: 0; display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: 12px; overflow: hidden; }
+.sessions-screen { min-height: 0; display: grid; grid-template-rows: repeat(5, auto) minmax(0, 1fr); gap: 12px; overflow: hidden; }
+.profile-switcher { padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 18px; background: rgba(255,255,255,.045); }
+.profile-switcher .select-field { gap: 5px; }
+.profile-switcher .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.profile-switcher .select-trigger { min-height: 44px; padding: 9px 11px; border-radius: 14px; }
 .search-wrap { position: relative; display: flex; align-items: center; }
 .search-wrap svg { position: absolute; left: 14px; color: #9a9a92; }
 .search-wrap input { padding-left: 42px; border-radius: 999px; }
@@ -162,10 +166,34 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 .message-row { max-width: 92%; border-radius: 20px; padding: 12px 14px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.08); }
 .message-row.user { align-self: flex-end; background: #123356; border-color: rgba(62,155,255,.25); }
 .message-row.assistant { align-self: flex-start; background: rgba(255,255,255,.055); }
+.message-row.grouped { margin-top: -8px; }
+.message-row.user.grouped { border-top-right-radius: 9px; }
+.message-row.assistant.grouped { border-top-left-radius: 9px; }
+.message-row.grouped .message-meta { display: none; }
 .message-row.status { align-self: center; max-width: 100%; color: #a9aaa3; padding: 9px 11px; border-radius: 14px; background: rgba(255,176,0,.08); }
 .message-row.tool { align-self: stretch; max-width: 100%; background: rgba(255,255,255,.045); color: #d9d9ce; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .message-meta { color: #9a9a92; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; }
-.message-row p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.message-content { min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.message-content > :first-child { margin-top: 0; }
+.message-content > :last-child { margin-bottom: 0; }
+.message-content p { margin: 0 0 .72em; white-space: normal; }
+.message-content h1, .message-content h2, .message-content h3 { margin: .9em 0 .38em; line-height: 1.2; letter-spacing: -.02em; }
+.message-content h1 { font-size: 1.3em; }
+.message-content h2 { font-size: 1.18em; }
+.message-content h3 { font-size: 1.08em; }
+.message-content ul, .message-content ol { margin: .55em 0 .75em; padding-left: 1.35em; }
+.message-content li + li { margin-top: .28em; }
+.message-content blockquote { margin: .7em 0; padding: .2em 0 .2em .8em; border-left: 3px solid rgba(255,176,0,.55); color: #c8c6bb; }
+.message-content :not(pre) > code { padding: .12em .38em; border-radius: 6px; background: rgba(0,0,0,.3); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+.code-block { position: relative; min-width: 0; margin: .7em 0; padding-top: 34px; border: 1px solid rgba(255,255,255,.1); border-radius: 13px; background: rgba(0,0,0,.34); overflow: hidden; }
+.code-block pre { margin: 0; padding: 12px; overflow-x: auto; overscroll-behavior-inline: contain; }
+.code-block code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: pre; }
+.copy-code { position: absolute; top: 5px; right: 6px; min-height: 28px; padding: 4px 8px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: rgba(255,255,255,.08); color: #d9d9ce; font-size: 11px; }
+.table-scroll { max-width: 100%; margin: .7em 0; overflow-x: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; }
+.message-content table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.message-content th, .message-content td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.09); text-align: left; white-space: nowrap; }
+.message-content th { background: rgba(255,255,255,.06); }
+.blocked-image { color: #a9aaa3; font-style: italic; }
 .message-row a { color: #87c7ff; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .attention-card {
   align-self: stretch; width: 100%; min-width: 0; display: grid; gap: 10px; padding: 13px;

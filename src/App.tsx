@@ -2,11 +2,13 @@ import { ArrowLeft, Bot, CheckCircle2, ChevronDown, CircleAlert, Clock3, Lock, M
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { approvalActionAvailability, attentionFromEvent, clarifyServerRequestResult, shouldDeclineOnPhone, AttentionRequest, AuthCapability, AuthMode, AuthSession, ChatMessage, eventToMessages, GatewayHandle, HermesApiClient, HermesSession, HistoryPage, HttpError, isAuthError, isNotFoundError, RuntimeModelOption, RuntimeOptions, RuntimeSelection, SessionPage, normalizeServerUrl } from './lib/hermesApi';
 import { MockHermesClient, starterMessages } from './lib/mockHermes';
-import { formatMessageTextForMobile } from './lib/mobileText';
+import { MessageContent } from './components/MessageContent';
+import { compactMessagesForMobile } from './lib/mobileText';
 import { ConnectionView, deriveConnectionView } from './lib/connectionState';
 import { applyHistoryPage, beginHistoryLoad, createHistoryState, failHistoryLoad, historyPresentation, HistoryPresentation, HistoryScope, historyScopeKey, HistoryState } from './lib/history';
 import { AttentionState, beginResponse, createAttentionState, markDisconnected, markSendFailed, markSent, reconcileEvent, reconcileResume, requestKey, showAttention } from './lib/attentionState';
-import { appStorageKeys, clearContinueReference, clearRememberedToken, forgetThisDevice, loadContinueReference, loadLoginHint, loadRememberedToken, loadServerUrl, migrateLegacyStorage, saveContinueReference, saveLoginHint, saveRememberedToken, saveServerUrl, scopeFromServerUrl, StorageScope } from './lib/storage';
+import { appStorageKeys, clearContinueReference, clearRememberedToken, forgetThisDevice, loadActiveProfile, loadContinueReference, loadLoginHint, loadRememberedToken, loadServerUrl, migrateLegacyStorage, saveActiveProfile, saveContinueReference, saveLoginHint, saveRememberedToken, saveServerUrl, scopeFromServerUrl, StorageScope } from './lib/storage';
+import { admitSessionsForProfile, historyPageBelongsToScope, isProfileActionStale, resolveActiveProfile, seedNewChatSelection, sessionRowKey } from './lib/profileScope';
 
 type Client = HermesApiClient | MockHermesClient;
 type Screen = 'connect' | 'sessions' | 'chat';
@@ -97,6 +99,7 @@ export function App() {
   const [sessions, setSessions] = useState<HermesSession[]>([]);
   const [runtimeOptions, setRuntimeOptions] = useState<RuntimeOptions>({ profiles: ['default'], currentProfile: 'default', models: [] });
   const [runtimeSelection, setRuntimeSelection] = useState<RuntimeSelection>({ profile: 'default' });
+  const [activeProfile, setActiveProfile] = useState('default');
   const [reasoningChoice, setReasoningChoice] = useState<ReasoningChoice>('inherit');
   const [newChatSheetOpen, setNewChatSheetOpen] = useState(false);
   const [sessionPage, setSessionPage] = useState<Pick<SessionPage, 'total' | 'limit' | 'offset'>>({ limit: 75, offset: 0 });
@@ -117,6 +120,8 @@ export function App() {
   const historySessionRef = useRef<HermesSession | null>(null);
   const scopeKeyRef = useRef<string>('');
   const openGenerationRef = useRef(0);
+  const sessionLoadGenerationRef = useRef(0);
+  const activeProfileRef = useRef(activeProfile);
   const historyRef = useRef<HistoryState | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -131,6 +136,7 @@ export function App() {
   const autoRestoreStarted = useRef(false);
 
   historyRef.current = history;
+  activeProfileRef.current = activeProfile;
 
   function currentScope(session: HermesSession | null, activeClient: Client | null): StorageScope | null {
     if (!activeClient || !('sessionHistoryPage' in activeClient) || activeClient.baseUrl.startsWith('mock')) return null;
@@ -152,25 +158,22 @@ export function App() {
     return error instanceof Error ? error.message : fallback;
   }
 
-  async function resolveContinueTarget(activeClient: Client, authSession: AuthSession, loaded: HermesSession[]): Promise<ContinueTarget | null> {
-    const profiles = Array.from(new Set<string | undefined>([undefined, ...loaded.map((session) => session.profile)]));
-    for (const profile of profiles) {
-      const scope = currentScope(profile ? { id: '', profile } : null, activeClient);
-      if (!scope) return null;
-      const reference = loadContinueReference(scope);
-      if (!reference) continue;
-      const inList = loaded.find((session) => session.id === reference.sessionId && (session.profile ?? '') === (profile ?? ''));
-      if (inList) return { session: inList, loaded: true };
-      if (!('sessionDetail' in activeClient)) return null;
-      try {
-        const detail = await activeClient.sessionDetail(authSession, { id: reference.sessionId, profile, title: reference.title });
-        return { session: { ...detail, title: detail.title ?? reference.title }, loaded: false };
-      } catch (error) {
-        if (isNotFoundError(error)) clearContinueReference();
-        return null;
-      }
+  async function resolveContinueTarget(activeClient: Client, authSession: AuthSession, loaded: HermesSession[], profile: string): Promise<ContinueTarget | null> {
+    const scope = currentScope({ id: '', profile }, activeClient);
+    if (!scope) return null;
+    const reference = loadContinueReference(scope);
+    if (!reference) return null;
+    const inList = loaded.find((session) => session.id === reference.sessionId && admitSessionsForProfile([session], profile).length === 1);
+    if (inList) return { session: inList, loaded: true };
+    if (!('sessionDetail' in activeClient)) return null;
+    try {
+      const detail = await activeClient.sessionDetail(authSession, { id: reference.sessionId, profile, title: reference.title });
+      if (detail.id !== reference.sessionId || admitSessionsForProfile([detail], profile).length !== 1) return null;
+      return { session: { ...detail, profile, title: detail.title ?? reference.title }, loaded: false };
+    } catch (error) {
+      if (isNotFoundError(error)) clearContinueReference();
+      return null;
     }
-    return null;
   }
 
   useEffect(() => {
@@ -187,14 +190,14 @@ export function App() {
       try {
         const [status, providers] = await Promise.all([api.status(), api.authProviders()]);
         const capability = api.capability(status, providers);
-        const loaded = await loadSessionPage(api, restoredAuth, 0);
+        const profile = await configureRuntimeControls(api, restoredAuth);
+        const loaded = await loadSessionPage(api, restoredAuth, 0, profile);
         setClient(api);
         setAuth(restoredAuth);
         setAuthExpired(false);
         setSessions(loaded.sessions);
         setSessionPage({ total: loaded.total, limit: loaded.limit, offset: loaded.offset });
-        setContinueTarget(await resolveContinueTarget(api, restoredAuth, loaded.sessions));
-        void loadRuntimeControls(api, restoredAuth);
+        setContinueTarget(await resolveContinueTarget(api, restoredAuth, loaded.sessions, profile));
         setConnection((state) => ({
           ...state,
           rawUrl: normalized,
@@ -307,6 +310,10 @@ export function App() {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`;
     const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 72;
     document.documentElement.style.setProperty('--composer-height', `${Math.ceil(composerHeight)}px`);
+    if (stickToBottomRef.current || document.activeElement === textarea) {
+      if (messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+      scrollChatToBottom();
+    }
   }, [screen, composer, attachments.length]);
 
   function scrollChatToBottom() {
@@ -414,11 +421,12 @@ export function App() {
         activeClient = new MockHermesClient();
         setClient(activeClient);
         setAuth({ mode: 'token', token: 'mock' });
-        const loaded = await loadSessionPage(activeClient, { mode: 'token', token: 'mock' }, 0);
+        const profile = await configureRuntimeControls(activeClient, { mode: 'token', token: 'mock' });
+        const loaded = await loadSessionPage(activeClient, { mode: 'token', token: 'mock' }, 0, profile);
         setSessions(loaded.sessions);
         setSessionPage({ total: loaded.total, limit: loaded.limit, offset: loaded.offset });
         setContinueTarget(null);
-        void loadRuntimeControls(activeClient, { mode: 'token', token: 'mock' });
+
         saveLoginHint({ mode: 'mock' });
         setConnection((state) => ({ ...state, status: 'ready', message: 'Mock mode connected. No real Hermes server was contacted.' }));
         setScreen('sessions');
@@ -440,15 +448,15 @@ export function App() {
         else clearRememberedToken();
         saveLoginHint({ mode: 'token', username: connection.username });
       }
-      const loaded = await loadSessionPage(activeClient, session, 0);
+      const profile = await configureRuntimeControls(activeClient, session);
+      const loaded = await loadSessionPage(activeClient, session, 0, profile);
       saveServerUrl(normalized);
       setClient(activeClient);
       setAuth(session);
       setAuthExpired(false);
       setSessions(loaded.sessions);
       setSessionPage({ total: loaded.total, limit: loaded.limit, offset: loaded.offset });
-      setContinueTarget(await resolveContinueTarget(activeClient, session, loaded.sessions));
-      void loadRuntimeControls(activeClient, session);
+      setContinueTarget(await resolveContinueTarget(activeClient, session, loaded.sessions, profile));
       setConnection((state) => ({ ...state, password: '', status: 'ready', message: 'Connected.' }));
       setHasLocalData(true);
       setScreen('sessions');
@@ -480,47 +488,104 @@ export function App() {
     setScreen('connect');
   }
 
-  async function loadSessionPage(activeClient: Client, authSession: AuthSession, offset: number): Promise<SessionPage> {
-    return activeClient.sessionPage(authSession, { limit: 75, offset });
+  async function loadSessionPage(activeClient: Client, authSession: AuthSession, offset: number, profile: string): Promise<SessionPage> {
+    const page = await activeClient.sessionPage(authSession, { limit: 75, offset, profile });
+    return { ...page, sessions: admitSessionsForProfile(page.sessions, profile) };
   }
 
-  async function loadRuntimeControls(activeClient: Client, authSession: AuthSession) {
-    if (!('runtimeOptions' in activeClient)) return;
+  async function configureRuntimeControls(activeClient: Client, authSession: AuthSession): Promise<string> {
+    let options: RuntimeOptions = { profiles: ['default'], currentProfile: 'default', models: [] };
     try {
-      const options = await activeClient.runtimeOptions(authSession);
-      setRuntimeOptions(options);
-      setRuntimeSelection((current) => {
-        const currentModel = current.provider && current.model ? current : options.currentModel;
-        return {
-          profile: current.profile && options.profiles.includes(current.profile) ? current.profile : options.currentProfile,
-          provider: currentModel?.provider,
-          model: currentModel?.model,
-        };
-      });
+      if ('runtimeOptions' in activeClient) options = await activeClient.runtimeOptions(authSession);
     } catch {
       // Runtime controls are optional; session list/chat should still work.
     }
+    const hostScope = scopeFromServerUrl(activeClient.baseUrl);
+    const remembered = hostScope ? loadActiveProfile(hostScope.origin, hostScope.basePath) : null;
+    const profile = resolveActiveProfile(options.profiles, options.currentProfile, remembered);
+    setRuntimeOptions(options);
+    setActiveProfile(profile);
+    activeProfileRef.current = profile;
+    setRuntimeSelection((current) => {
+      const currentModel = current.provider && current.model ? current : options.currentModel;
+      return { profile, provider: currentModel?.provider, model: currentModel?.model };
+    });
+    return profile;
   }
 
   async function loadMoreSessions() {
     if (!client || !auth || sessionsLoading) return;
+    const generation = sessionLoadGenerationRef.current;
+    const profile = activeProfileRef.current;
     const nextOffset = sessions.length;
     setSessionsLoading(true);
     setBanner('');
     try {
-      const loaded = await loadSessionPage(client, auth, nextOffset);
-      setSessions((current) => [...current, ...loaded.sessions.filter((session) => !current.some((seen) => seen.id === session.id))]);
+      const loaded = await loadSessionPage(client, auth, nextOffset, profile);
+      if (isProfileActionStale(generation, sessionLoadGenerationRef.current, profile, activeProfileRef.current)) return;
+      setSessions((current) => [
+        ...current,
+        ...loaded.sessions.filter((session) => !current.some((seen) => seen.id === session.id)),
+      ]);
       setSessionPage({ total: loaded.total, limit: loaded.limit, offset: loaded.offset });
     } catch (error) {
-      setBanner(handleAuthFailure(error, 'Could not load more sessions.'));
+      if (!isProfileActionStale(generation, sessionLoadGenerationRef.current, profile, activeProfileRef.current)) {
+        setBanner(handleAuthFailure(error, 'Could not load more sessions.'));
+      }
     } finally {
-      setSessionsLoading(false);
+      if (generation === sessionLoadGenerationRef.current) setSessionsLoading(false);
+    }
+  }
+
+  async function switchActiveProfile(profile: string) {
+    if (!client || !auth || profile === activeProfileRef.current || !runtimeOptions.profiles.includes(profile)) return;
+    const generation = sessionLoadGenerationRef.current + 1;
+    sessionLoadGenerationRef.current = generation;
+    openGenerationRef.current += 1;
+    closeGateway();
+    activeProfileRef.current = profile;
+    setActiveProfile(profile);
+    setRuntimeSelection((current) => ({ ...current, ...seedNewChatSelection(profile) }));
+    setSessions([]);
+    setSessionPage({ limit: 75, offset: 0 });
+    setSessionFilter('');
+    sessionListScrollRef.current = 0;
+    setContinueTarget(null);
+    setActiveSession(null);
+    setHistory(null);
+    historySessionRef.current = null;
+    setLiveMessages([]);
+    setAttention(createAttentionState(''));
+    setComposer('');
+    setAttachments([]);
+    setBanner('Loading conversations…');
+    setSessionsLoading(true);
+    const hostScope = scopeFromServerUrl(client.baseUrl);
+    if (hostScope) saveActiveProfile(hostScope.origin, hostScope.basePath, profile);
+    try {
+      const loaded = await loadSessionPage(client, auth, 0, profile);
+      if (isProfileActionStale(generation, sessionLoadGenerationRef.current, profile, activeProfileRef.current)) return;
+      setSessions(loaded.sessions);
+      setSessionPage({ total: loaded.total, limit: loaded.limit, offset: loaded.offset });
+      setContinueTarget(await resolveContinueTarget(client, auth, loaded.sessions, profile));
+      if (!isProfileActionStale(generation, sessionLoadGenerationRef.current, profile, activeProfileRef.current)) setBanner('');
+    } catch (error) {
+      if (!isProfileActionStale(generation, sessionLoadGenerationRef.current, profile, activeProfileRef.current)) {
+        setBanner(handleAuthFailure(error, 'Could not load conversations for this profile.'));
+      }
+    } finally {
+      if (generation === sessionLoadGenerationRef.current) setSessionsLoading(false);
     }
   }
 
   function applyPage(generation: number, page: HistoryPage, scopeKey: string, mode: 'initial' | 'older' | 'refresh') {
     if (generation !== openGenerationRef.current) return;
-    setHistory((current) => current ? applyHistoryPage(current, page, scopeKey, mode) : current);
+    setHistory((current) => {
+      const target = historySessionRef.current;
+      return current && target && historyPageBelongsToScope(page, { sessionId: target.id, profile: target.profile })
+        ? applyHistoryPage(current, page, scopeKey, mode)
+        : current;
+    });
     if (mode === 'refresh') {
       setLiveMessages((current) => dedupeLiveAgainstHistory(current, page.messages));
     }
@@ -580,6 +645,10 @@ export function App() {
 
   async function openSession(session: HermesSession) {
     if (!client || !auth) return;
+    if (admitSessionsForProfile([session], activeProfileRef.current).length !== 1) {
+      setBanner('Switch to this conversation’s profile before opening it.');
+      return;
+    }
     const generation = openGenerationRef.current + 1;
     openGenerationRef.current = generation;
     sessionListScrollRef.current = sessionListRef.current?.scrollTop ?? 0;
@@ -684,7 +753,7 @@ export function App() {
   }
 
   async function newChat() {
-    const session: HermesSession = { id: `new-${Date.now()}`, title: 'New chat', preview: 'Fresh Hermes session', updated_at: new Date().toISOString() };
+    const session: HermesSession = { id: `new-${Date.now()}`, title: 'New chat', preview: 'Fresh Hermes session', updated_at: new Date().toISOString(), profile: runtimeSelection.profile ?? activeProfileRef.current };
     const generation = openGenerationRef.current + 1;
     openGenerationRef.current = generation;
     closeGateway();
@@ -713,7 +782,7 @@ export function App() {
       });
       if (stale()) { gateway.close(); return; }
       gatewayRef.current = gateway;
-      const selectedRuntime = selectedRuntimePayload(runtimeSelection, reasoningChoice);
+      const selectedRuntime = selectedRuntimePayload({ ...runtimeSelection, profile: activeProfileRef.current }, reasoningChoice);
       const createdIds = await gateway.createSession(selectedRuntime);
       if (stale()) return;
       const id = createdIds.storedId;
@@ -937,8 +1006,16 @@ export function App() {
           <section className="sessions-screen">
             <div className="session-summary"><strong>{sessions.length}</strong><span>{typeof sessionPage.total === 'number' ? ` of ${sessionPage.total} conversations loaded` : ' conversations loaded'}</span></div>
             {banner && <div className="inline-banner"><WifiOff size={16} /> {banner}</div>}
+            <div className="profile-switcher">
+              <CustomSelect
+                label="Active profile"
+                value={activeProfile}
+                options={(runtimeOptions.profiles.length ? runtimeOptions.profiles : ['default']).map((profile) => ({ value: profile, label: profile }))}
+                onChange={(profile) => { void switchActiveProfile(profile); }}
+              />
+            </div>
             <div className="search-wrap"><Search size={18} /><input placeholder="Search loaded sessions" value={sessionFilter} onChange={(event) => setSessionFilter(event.target.value)} /></div>
-            <button className="new-chat" onClick={() => setNewChatSheetOpen(true)}><Plus size={20} /> New chat</button>
+            <button className="new-chat" onClick={() => { setRuntimeSelection((current) => ({ ...current, ...seedNewChatSelection(activeProfileRef.current) })); setNewChatSheetOpen(true); }}><Plus size={20} /> New chat</button>
             <div className="session-list" ref={sessionListRef}>
               {continueTarget && !sessionFilter && (
                 <button className="session-row continue-row" onClick={() => openSession(continueTarget.session)} aria-label={`Continue ${continueTarget.session.title || 'last conversation'}`}>
@@ -947,7 +1024,7 @@ export function App() {
                   <time>{relativeTime(continueTarget.session.updated_at)}</time>
                 </button>
               )}
-              {filteredSessions.map((session) => <button key={`${session.profile ?? ''}:${session.id}`} className="session-row" onClick={() => openSession(session)}><div className="session-dot">{session.running ? <Radio size={15} /> : <MessageCircle size={15} />}</div><div className="session-copy"><strong>{session.title || session.preview || 'Untitled session'}</strong><span>{session.preview || session.source || session.id}</span><small>{[session.message_count ? `${session.message_count} messages` : '', session.profile, session.workspace, session.source].filter(Boolean).join(' · ')}</small></div><time>{relativeTime(session.updated_at)}</time></button>)}
+              {filteredSessions.map((session) => <button key={sessionRowKey(session.id, session.profile)} className="session-row" onClick={() => openSession(session)}><div className="session-dot">{session.running ? <Radio size={15} /> : <MessageCircle size={15} />}</div><div className="session-copy"><strong>{session.title || session.preview || 'Untitled session'}</strong><span>{session.preview || session.source || session.id}</span><small>{[session.message_count ? `${session.message_count} messages` : '', session.profile, session.workspace, session.source].filter(Boolean).join(' · ')}</small></div><time>{relativeTime(session.updated_at)}</time></button>)}
               {canLoadMore && <button className="load-more" onClick={loadMoreSessions} disabled={sessionsLoading}>{sessionsLoading ? 'Loading…' : `Load more (${Math.min(75, (sessionPage.total ?? sessions.length) - sessions.length)} more)`}</button>}
             </div>
           </section>
@@ -969,7 +1046,7 @@ export function App() {
               {presentation === 'complete' && history && history.messages.length > 0 && <div className="history-state subtle" data-history="complete">Beginning of conversation</div>}
               {presentation === 'partial' && history?.error && <div className="history-state bad" role="alert" data-history="partial-error">{history.error}</div>}
               {presentation === 'empty' && visibleMessages.length === 0 && <div className="empty-chat" data-history="empty"><Sparkles size={28} /><strong>Nothing here yet</strong><span>This conversation has no messages. Send a prompt to start.</span></div>}
-              {visibleMessages.map((message) => <MessageRow key={message.id} message={message} />)}
+              {visibleMessages.map((message, index) => <MessageRow key={message.id} message={message} grouped={index > 0 && (message.role === 'user' || message.role === 'assistant') && visibleMessages[index - 1].role === message.role} />)}
               {attentionActive && attention.request && <AttentionCard request={attention.request} submitting={attention.phase === 'submitting'} locked={attention.phase !== 'waiting'} note={attention.note} onApproval={respondToApproval} onClarify={respondToClarify} />}
               {!attentionActive && attention.note && (attention.phase === 'resolved' || attention.phase === 'cancelled' || attention.phase === 'disconnected') && <div className={`history-state ${attention.phase === 'disconnected' ? 'bad' : 'subtle'}`} role="status" data-attention={attention.phase}>{attention.note}</div>}
               <div ref={messagesEndRef} />
@@ -1004,13 +1081,13 @@ export function App() {
               </div>
               <button type="button" className="icon-btn" aria-label="Cancel new chat" onClick={() => setNewChatSheetOpen(false)}><X size={18} /></button>
             </div>
-            <p className="sheet-copy">Pick the runtime for this chat. These choices do not change your global Hermes defaults.</p>
+            <p className="sheet-copy">Pick the model and reasoning for this chat. The active Conversations profile remains in scope.</p>
             <div className="runtime-controls" aria-label="New chat runtime controls">
               <CustomSelect
                 label="Profile"
-                value={runtimeSelection.profile || runtimeOptions.currentProfile || 'default'}
-                options={(runtimeOptions.profiles.length ? runtimeOptions.profiles : ['default']).map((profile) => ({ value: profile, label: profile }))}
-                onChange={(profile) => setRuntimeSelection((state) => ({ ...state, profile }))}
+                value={activeProfile}
+                options={[{ value: activeProfile, label: activeProfile }]}
+                onChange={() => undefined}
               />
               {modelSelectOptions.length > 0 && <CustomSelect
                 label="Model"
@@ -1052,39 +1129,6 @@ function hostLabelFor(baseUrl: string): string {
   }
 }
 
-function compactMessagesForMobile(messages: ChatMessage[]): ChatMessage[] {
-  const compacted: ChatMessage[] = [];
-  for (const message of messages) {
-    if (isToolLikeMessage(message)) continue;
-    if (message.role === 'status' && message.text === 'Thinking…' && compacted.some((seen) => seen.role === 'assistant' && seen.state === 'streaming')) {
-      continue;
-    }
-    compacted.push(message);
-  }
-  return compacted;
-}
-
-function isToolLikeMessage(message: ChatMessage): boolean {
-  if (message.role === 'tool') return true;
-  const text = message.text.trim();
-  if (!text) return false;
-  const meta = (message.meta ?? '').toLowerCase();
-  const toolish = meta.includes('tool') || isToolArtifactText(text);
-  return toolish;
-}
-
-function isToolArtifactText(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (/^\[This response was interrupted by a user correction\.\]/i.test(trimmed)) return true;
-  if (/^<untrusted_tool_result\b/i.test(trimmed)) return true;
-  if (/^\[CONTEXT COMPACTION\s+[—-]\s+REFERENCE ONLY\]/i.test(trimmed)) return true;
-  if (/^\[(terminal|browser[_\.]|read_file|search_files|execute_code|patch|write_file|process|tool|function)\]/im.test(trimmed)) return true;
-  if (/\b(prompt\.submit|session\.resume|tool_calls?|tool_use|tool_result|function_call|jsonrpc|rpc|session_id)\b/i.test(trimmed) && /[{}]/.test(trimmed)) return true;
-  if (/["'](output|exit_code|stderr|stdout|success|method|params|session_id|tool_call_id|function|arguments|content_base64)["']\s*:/i.test(trimmed)) return true;
-  if (/```(?:json|text)?[\s\S]*?["'](method|params|session_id|output|exit_code|tool_call_id)["']\s*:/i.test(trimmed)) return true;
-  return false;
-}
 
 function StatusPill({ view }: { view: ConnectionView }) {
   const icon = view.tone === 'ok' ? <CheckCircle2 size={14} /> : view.tone === 'bad' || view.tone === 'attention' ? <CircleAlert size={14} /> : view.tone === 'busy' ? <Radio size={14} /> : <Clock3 size={14} />;
@@ -1271,36 +1315,8 @@ function AttentionCard({ request, submitting, locked, note, onApproval, onClarif
   );
 }
 
-function MessageRow({ message }: { message: ChatMessage }) {
-  const text = formatMessageTextForMobile(message.role === 'tool' ? summarizeToolText(message.text) : message.text);
-  return <article className={`message-row ${message.role} ${message.state ?? ''}`}><div className="message-meta">{message.role}{message.meta ? ` · ${message.meta}` : ''}</div><p>{renderMessageContent(text)}</p></article>;
-}
-
-function renderMessageContent(text: string) {
-  const urlPattern = /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?])/g;
-  const urlOnlyPattern = /^https?:\/\/[^\s<>()]+[^\s<>().,;:!?]$/;
-  const parts = text.split(urlPattern);
-  return parts.map((part, index) => urlOnlyPattern.test(part)
-    ? <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">{part}</a>
-    : part);
-}
-
-function summarizeToolText(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('{')) return text;
-  try {
-    const parsed = JSON.parse(trimmed) as { output?: unknown; exit_code?: unknown; error?: unknown; status?: unknown };
-    const output = typeof parsed.output === 'string' ? parsed.output.trim() : '';
-    const error = typeof parsed.error === 'string' ? parsed.error.trim() : '';
-    const status = typeof parsed.status === 'string' ? parsed.status : '';
-    const exit = typeof parsed.exit_code === 'number' ? `exit ${parsed.exit_code}` : status;
-    const body = output || error || trimmed;
-    const firstLines = body.split('\n').filter(Boolean).slice(0, 4).join('\n');
-    const suffix = body.length > firstLines.length ? '\n…' : '';
-    return [exit, `${firstLines}${suffix}`].filter(Boolean).join(' · ');
-  } catch {
-    return text;
-  }
+function MessageRow({ message, grouped }: { message: ChatMessage; grouped?: boolean }) {
+  return <article className={`message-row ${message.role} ${message.state ?? ''} ${grouped ? 'grouped' : ''}`}><div className="message-meta">{message.role}{message.meta ? ` · ${message.meta}` : ''}</div><MessageContent text={message.text} /></article>;
 }
 
 function relativeTime(value?: string) {

@@ -122,6 +122,55 @@ describe('history API transcript fetching', () => {
 
 
 
+describe('sessionPage server-side profile filter', () => {
+  it('sends the active profile as a server-side query param and normalizes rows', async () => {
+    const seen: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      seen.push(url);
+      return new Response(
+        JSON.stringify({
+          sessions: [
+             { id: 's1', title: 'Sales plan', profile: 'sales-test', message_count: 3, updated_at: '2026-01-01T00:00:00.000Z' },
+             { id: 's2', message_count: 1, updated_at: '2026-01-02T00:00:00.000Z' },
+            ],
+          total: 2,
+          limit: 75,
+          offset: 0,
+         }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+     }) as unknown as typeof fetch;
+    try {
+      const page = await new HermesApiClient('https://agent.example/hermes')
+         .sessionPage({ mode: 'password' }, { limit: 75, offset: 0, profile: 'sales-test' });
+      expect(seen[0]).toContain('profile=sales-test');
+      expect(seen[0]).toContain('limit=75');
+      expect(seen[0]).toContain('offset=0');
+      expect(page.sessions.map((session) => session.id)).toEqual(['s1', 's2']);
+      expect(page.sessions.every((session) => session.profile === 'sales-test')).toBe(true);
+     } finally {
+      globalThis.fetch = originalFetch;
+     }
+    });
+
+  it('omits the profile param when no profile is requested', async () => {
+    const seen: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen.push(String(input));
+      return new Response(JSON.stringify({ sessions: [], total: 0, limit: 75, offset: 0 }), { status: 200 });
+     }) as unknown as typeof fetch;
+    try {
+      await new HermesApiClient('https://agent.example/hermes').sessionPage({ mode: 'password' }, { limit: 5, offset: 0 });
+      expect(seen[0]).not.toContain('profile=');
+     } finally {
+      globalThis.fetch = originalFetch;
+     }
+    });
+});
+
 describe('updateAttentionFromEvent', () => {
   it('clears only the matching expired attention request', () => {
     const current = { kind: 'clarify' as const, requestId: 'req-1', title: 'Hermes needs an answer', detail: 'Pick one' };

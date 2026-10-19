@@ -7,6 +7,9 @@ const SESSION_CACHE_KEY = 'hermes-mobile-pwa.sessions-cache.v1';
 
 export const STORAGE_SCHEMA_VERSION = 2;
 const CONTINUE_KEY = 'hermes-mobile-pwa.continue.v2';
+// The active profile is a host-scoped app preference, kept separate from the
+// per-scope continue reference (which is profile-scoped).
+const ACTIVE_PROFILE_KEY = 'hermes-mobile-pwa.active-profile.v1';
 const SCHEMA_KEY = 'hermes-mobile-pwa.schema-version';
 const LEGACY_KEYS = ['hermes-mobile-pwa.sessions-cache.v1', 'hermes-mobile-pwa.last-session-id'];
 
@@ -147,6 +150,43 @@ export function clearContinueReference(): void {
   window.localStorage.removeItem(CONTINUE_KEY);
 }
 
+// The active profile is a minimal, host-scoped app preference: just origin + base
+// path + which profile the last operator picked on this host. It never stores
+// previews, messages, or any other profile's data.
+export function loadActiveProfile(origin: string, basePath: string): string | null {
+  const raw = window.localStorage.getItem(ACTIVE_PROFILE_KEY);
+  if (!raw) return null;
+  let parsed: { v?: unknown; origin?: unknown; basePath?: unknown; profile?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    window.localStorage.removeItem(ACTIVE_PROFILE_KEY);
+    return null;
+  }
+  if (parsed?.v !== STORAGE_SCHEMA_VERSION) return null;
+  const profile = typeof parsed.profile === 'string' ? parsed.profile.trim() : '';
+  if (!profile) return null;
+  if (typeof parsed.origin !== 'string' || parsed.origin !== origin) return null;
+  if ((parsed.basePath ?? '') !== (basePath ?? '')) return null;
+  return profile;
+}
+
+export function saveActiveProfile(origin: string, basePath: string, profile: string): void {
+  const value = profile?.trim();
+  if (!value || (!origin.startsWith('http://') && !origin.startsWith('https://'))) return;
+  window.localStorage.setItem(ACTIVE_PROFILE_KEY, JSON.stringify({
+    v: STORAGE_SCHEMA_VERSION,
+    origin,
+    basePath: basePath ?? '',
+    profile: value,
+    savedAt: new Date().toISOString(),
+    }));
+}
+
+export function clearActiveProfile(): void {
+  window.localStorage.removeItem(ACTIVE_PROFILE_KEY);
+}
+
 export function loadSessionCache(): HermesSession[] {
   // Private previews are no longer persisted; continue references are scoped.
   return [];
@@ -159,7 +199,7 @@ export function saveSessionCache(sessions: HermesSession[]): void {
 }
 
 export function forgetThisDevice(): string[] {
-  const keys = [CONTINUE_KEY, SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS];
+  const keys = [CONTINUE_KEY, ACTIVE_PROFILE_KEY, SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS];
   const removed: string[] = [];
   for (const key of keys) {
     if (window.localStorage.getItem(key) !== null) {

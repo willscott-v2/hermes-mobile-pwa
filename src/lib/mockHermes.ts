@@ -4,20 +4,40 @@ const LONG_HISTORY_TOTAL = 300;
 const LONG_HISTORY_ID = 'mock-long-history';
 const RUNNING_BUILD_ID = 'mock-running-build';
 
-const sessions: HermesSession[] = [
-  { id: LONG_HISTORY_ID, title: 'Long research thread', preview: 'A long conversation to test older-message loading.', updated_at: new Date().toISOString(), message_count: LONG_HISTORY_TOTAL, running: false, source: 'mock' },
-  { id: RUNNING_BUILD_ID, title: 'Running build', preview: 'Hermes is still working on this one.', updated_at: new Date().toISOString(), message_count: 4, running: true, source: 'mock' },
-  { id: 'mock-weekend-reading', title: 'Weekend reading', preview: 'Summarize the three articles I saved about better sleep.', updated_at: new Date().toISOString(), message_count: 6, running: false, source: 'mock' },
-  { id: 'mock-lisbon-trip', title: 'Lisbon trip', preview: 'Find 3 well-rated hotels under €150.', updated_at: new Date(Date.now() - 1000 * 60 * 48).toISOString(), message_count: 9, running: true, source: 'mock' },
-  { id: 'mock-deployment-question', title: 'Deployment question', preview: 'Hermes needs a short custom answer.', updated_at: new Date(Date.now() - 1000 * 60 * 55).toISOString(), message_count: 5, running: true, source: 'mock' },
-  { id: 'mock-campaign-regions', title: 'Campaign regions', preview: 'Choose more than one launch region.', updated_at: new Date(Date.now() - 1000 * 60 * 75).toISOString(), message_count: 5, running: true, source: 'mock' },
-  { id: 'mock-cron-digest', title: 'Morning news digest', preview: 'Cron job output from this morning.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(), message_count: 3, running: false, source: 'cron' },
-  { id: 'mock-interrupted-approval', title: 'Interrupted approval', preview: 'An approval snapshot is missing its response handle.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), message_count: 3, running: true, source: 'mock' },
-  { id: 'mock-deny-only-approval', title: 'Deny-only approval', preview: 'This blocked command cannot be approved once.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 4.5).toISOString(), message_count: 3, running: true, source: 'mock' },
-  { id: 'mock-current-approval', title: 'Current gateway approval', preview: 'A current-protocol approval can be answered from mobile.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 4.75).toISOString(), message_count: 3, running: true, source: 'mock' },
-  { id: 'mock-deployment-credentials', title: 'Deployment credentials', preview: 'A deployment is waiting for a secret.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), message_count: 4, running: true, source: 'mock' },
-  { id: 'mock-system-update', title: 'System update', preview: 'A system update is waiting for sudo.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), message_count: 4, running: true, source: 'mock' },
+const RAW_MOCK_SESSIONS: HermesSession[] = [
+   { id: LONG_HISTORY_ID, title: 'Long research thread', preview: 'A long conversation to test older-message loading.', updated_at: new Date().toISOString(), message_count: LONG_HISTORY_TOTAL, running: false, source: 'mock' },
+   { id: RUNNING_BUILD_ID, title: 'Running build', preview: 'Hermes is still working on this one.', updated_at: new Date().toISOString(), message_count: 4, running: true, source: 'mock' },
+   { id: 'mock-weekend-reading', title: 'Weekend reading', preview: 'Summarize the three articles I saved about better sleep.', updated_at: new Date().toISOString(), message_count: 6, running: false, source: 'mock' },
+   { id: 'mock-lisbon-trip', title: 'Lisbon trip', preview: 'Find 3 well-rated hotels under €150.', updated_at: new Date(Date.now() - 1000 * 60 * 48).toISOString(), message_count: 9, running: true, source: 'mock' },
+   { id: 'mock-deployment-question', title: 'Deployment question', preview: 'Hermes needs a short custom answer.', updated_at: new Date(Date.now() - 1000 * 60 * 55).toISOString(), message_count: 5, running: true, source: 'mock' },
+   { id: 'mock-campaign-regions', title: 'Campaign regions', preview: 'Choose more than one launch region.', updated_at: new Date(Date.now() - 1000 * 60 * 75).toISOString(), message_count: 5, running: true, source: 'mock' },
+   { id: 'mock-cron-digest', title: 'Morning news digest', preview: 'Cron job output from this morning.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(), message_count: 3, running: false, source: 'cron' },
+   { id: 'mock-interrupted-approval', title: 'Interrupted approval', preview: 'An approval snapshot is missing its response handle.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), message_count: 3, running: true, source: 'mock' },
+   { id: 'mock-deny-only-approval', title: 'Deny-only approval', preview: 'This blocked command cannot be approved once.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 4.5).toISOString(), message_count: 3, running: true, source: 'mock' },
+   { id: 'mock-current-approval', title: 'Current gateway approval', preview: 'A current-protocol approval can be answered from mobile.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 4.75).toISOString(), message_count: 3, running: true, source: 'mock' },
+   { id: 'mock-deployment-credentials', title: 'Deployment credentials', preview: 'A deployment is waiting for a secret.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), message_count: 4, running: true, source: 'mock' },
+   { id: 'mock-system-update', title: 'System update', preview: 'A system update is waiting for sudo.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), message_count: 4, running: true, source: 'mock' },
+   // A private default-only session that must stay out of any non-default profile view.
+   { id: 'mock-private-default', title: 'Private default task', preview: 'Kept out of sales-test by exact profile scoping.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 8).toISOString(), message_count: 2, running: false, source: 'mock', profile: 'default' },
+   // The same id under default and under sales-test: two distinct rows.
+   { id: 'mock-shared-id', title: 'Shared task', preview: 'The default shared task.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 9).toISOString(), message_count: 1, running: false, source: 'mock', profile: 'default' },
+   { id: 'mock-shared-id', title: 'Shared task (sales view)', preview: 'Same session id under sales-test.', updated_at: new Date(Date.now() - 1000 * 60 * 50).toISOString(), message_count: 1, running: false, source: 'mock', profile: 'sales-test' },
+   { id: 'sales-campaign', title: 'Launch campaign', preview: 'Sales launch plan under the sales-test profile.', updated_at: new Date(Date.now() - 1000 * 60 * 40).toISOString(), message_count: 3, running: false, source: 'mock', profile: 'sales-test' },
 ];
+
+function normalizeProfileTag(profile?: string): string {
+  const value = profile?.trim();
+  return value || 'default';
+}
+
+// Untagged rows are the default profile.
+const sessions: HermesSession[] = RAW_MOCK_SESSIONS.map((row) => (row.profile ? row : { ...row, profile: 'default' }));
+
+function filterSessionsByProfile(rows: HermesSession[], profile?: string): HermesSession[] {
+  if (!profile || !profile.trim()) return rows;
+  const target = normalizeProfileTag(profile);
+  return rows.filter((row) => normalizeProfileTag(row.profile) === target);
+}
 
 export class MockHermesClient {
   readonly baseUrl = 'mock://hermes';
@@ -34,12 +54,13 @@ export class MockHermesClient {
   }
   capability() { return { kind: 'tokenOnly' as const }; }
   async passwordLogin(): Promise<AuthSession> { return { mode: 'password', username: 'mock' }; }
-  async sessionPage(_auth?: AuthSession, options: { limit?: number; offset?: number } = {}): Promise<SessionPage> {
+  async sessionPage(_auth?: AuthSession, options: { limit?: number; offset?: number; profile?: string } = {}): Promise<SessionPage> {
     const limit = options.limit ?? 75;
     const offset = options.offset ?? 0;
-    return { sessions: sessions.slice(offset, offset + limit), total: sessions.length, limit, offset };
+    const rows = filterSessionsByProfile(sessions, options.profile);
+    return { sessions: rows.slice(offset, offset + limit), total: rows.length, limit, offset };
   }
-  async sessions(_auth?: AuthSession, _limit?: number): Promise<HermesSession[]> { return sessions; }
+  async sessions(_auth?: AuthSession, _limit?: number, _profile?: string): Promise<HermesSession[]> { return filterSessionsByProfile(sessions, _profile); }
   async sessionMessages(_auth: AuthSession, session: HermesSession): Promise<ChatMessage[]> { return starterMessages(session); }
   async sessionTranscript(_auth: AuthSession, session: HermesSession): Promise<{ session: HermesSession; messages: ChatMessage[] }> { return { session, messages: starterMessages(session) }; }
   async sessionDetail(_auth: AuthSession, session: HermesSession): Promise<HermesSession> {
@@ -229,7 +250,7 @@ export function starterMessages(session?: HermesSession): ChatMessage[] {
   if (session.id === 'mock-weekend-reading') {
     return [
       { id: `${session.id}-u`, role: 'user', text: session.preview ?? 'Start a new task.', state: 'complete' },
-      { id: `${session.id}-a`, role: 'assistant', text: 'Load this URL on the phone:\n\nhttps://hermes.example.test/?v=23\n\nThen tap **Refresh transcript**.\n- The ` ```text ` fence markers should disappear.\n```text\n📎 filename.pdf\n```', state: 'complete' },
+      { id: `${session.id}-a`, role: 'assistant', text: '### Saved item\n\nLoad this URL on the phone:\n\nhttps://hermes.example.test/?v=23\n\n- Then tap **Refresh transcript**.\n- Keep `inline code` readable.\n\n```text\n📎 filename.pdf\n```', state: 'complete' },
     ];
   }
   return [
