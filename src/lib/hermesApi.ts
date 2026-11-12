@@ -95,10 +95,47 @@ export interface AttentionRequest {
   freeText?: boolean;
 }
 
+export type AttachmentKind = 'image' | 'pdf' | 'file';
+
 export interface AttachmentResult {
   name: string;
   text: string;
-  kind: 'image' | 'pdf' | 'file';
+  kind: AttachmentKind;
+}
+
+// A picked file whose bytes were captured while the selection event was handled. iOS can revoke the
+// OS-backed File handle shortly afterwards (WebKit bug 228683), so nothing downstream reads the File.
+export interface PreparedAttachment {
+  readonly id: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly dataUrl: string;
+}
+
+// Gateway caps: 25 MiB for images and general files, 50 MiB for PDFs.
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_PDF_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
+export function classifyAttachment(name: string, mimeType: string): AttachmentKind {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType === 'application/pdf' || name.toLowerCase().endsWith('.pdf')) return 'pdf';
+  return 'file';
+}
+
+export function attachmentRequest(sessionId: string, attachment: PreparedAttachment): { kind: AttachmentKind; method: 'image.attach_bytes' | 'pdf.attach' | 'file.attach'; params: Record<string, JsonValue> } {
+  const kind = classifyAttachment(attachment.name, attachment.mimeType);
+  const common = { session_id: sessionId, filename: attachment.name, name: attachment.name };
+  if (kind === 'image') return { kind, method: 'image.attach_bytes', params: { ...common, content_base64: attachment.dataUrl } };
+  if (kind === 'pdf') return { kind, method: 'pdf.attach', params: { ...common, content_base64: attachment.dataUrl } };
+  return { kind, method: 'file.attach', params: { session_id: sessionId, name: attachment.name, path: attachment.name, data_url: attachment.dataUrl } };
+}
+
+export function attachmentResultFromResponse(kind: AttachmentKind, name: string, result: Record<string, unknown>): AttachmentResult {
+  if (kind === 'image') return { name, kind, text: String(result.text ?? `[User attached image: ${name}]`) };
+  if (kind === 'pdf') return { name, kind, text: String(result.text ?? `[User attached PDF: ${name}]`) };
+  const ref = String(result.ref_text ?? result.text ?? '');
+  return { name, kind, text: ref ? `[User attached file: ${name}]\n${ref}` : `[User attached file: ${name}]` };
 }
 
 export interface RuntimeModelOption {
@@ -134,13 +171,25 @@ export interface CreatedSession {
   storedId: string;  // durable session key the REST API and Continue reference use
 }
 
+// Verified contract (gateway/session_surface.py): a turn delegated from the live voice layer is an
+// ordinary prompt.submit tagged `surface: 'voice-live'`; `voice_context` (the recent spoken exchange,
+// ≤6000 chars) rides the model input only and is never persisted or rendered.
+export interface SubmitPromptOptions {
+  surface?: 'voice-live';
+  voiceContext?: string;
+}
+
+export type InterruptOutcome = { status: 'interrupted' | 'not_interrupted' | 'unknown'; raw?: string };
+
 export interface GatewayHandle {
   createSession(selection?: RuntimeSelection): Promise<CreatedSession>;
   resumeSession(sessionId: string, profile?: string): Promise<ResumeResult>;
-  attachFile(sessionId: string, file: File): Promise<AttachmentResult>;
-  submitPrompt(sessionId: string, prompt: string): Promise<void>;
+  attachFile(sessionId: string, attachment: PreparedAttachment): Promise<AttachmentResult>;
+  submitPrompt(sessionId: string, prompt: string, options?: SubmitPromptOptions): Promise<void>;
   queuePrompt(sessionId: string, text: string): Promise<QueueOutcome>;
   steerSession(sessionId: string, text: string, profile?: string): Promise<SteerOutcome>;
+  // Stop the running turn (`session.interrupt`). Optional so the mock gateway stays untouched.
+  interruptSession?(sessionId: string, profile?: string): Promise<InterruptOutcome>;
   respondApproval(sessionId: string, requestId: string, choice: 'once' | 'deny'): Promise<void>;
   respondClarify(sessionId: string, requestId: string, answer: string, questionId?: string): Promise<void>;
   respondServerRequest(requestId: string, result: Record<string, JsonValue>): void;
@@ -194,22 +243,69 @@ export function endpointUrl(baseUrl: string, route: string): URL {
   return base;
 }
 
-export function wsUrl(baseUrl: string, params: Record<string, string>): string {
-  const url = endpointUrl(baseUrl, '/api/ws');
+function socketUrl(baseUrl: string, route: string, params: Record<string, string>): string {
+  const url = endpointUrl(baseUrl, route);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   return url.toString();
+}
+
+export function wsUrl(baseUrl: string, params: Record<string, string>): string {
+  return socketUrl(baseUrl, '/api/ws', params);
+}
+
+export type AudioSocketKind = 'transcribe-stream' | 'speak-stream';
+
+// GET /api/audio/voice-live/status (non-secret). `available` is false when the profile is not in
+// gpt-live mode or the gateway has no resolvable OpenAI key; the PWA then stays on chained voice.
+export interface VoiceLiveStatus {
+  mode: 'chained' | 'gpt-live';
+  available: boolean;
+  reason: string | null;
+  model: string;
+  voice: string;
+}
+
+export interface VoiceLiveHistoryMessage {
+  type: 'message';
+  role: 'user' | 'assistant' | 'developer';
+  content: Array<{ type: 'input_text' | 'output_text'; text: string }>;
+}
+
+export interface VoiceLiveAnswer {
+  sessionId: string | null;
+  sdp: string;
+}
+
+// Audio sockets are profile-scoped server side (STT/TTS provider config + keys resolve from the
+// requesting profile), so the profile is mandatory -- including `default`.
+export function audioWsUrl(baseUrl: string, kind: AudioSocketKind, params: { profile: string } & Record<string, string>): string {
+  const profile = params.profile?.trim();
+  if (!profile) throw new Error('An explicit profile is required for voice sockets.');
+  const { profile: _profile, ...credential } = params;
+  return socketUrl(baseUrl, `/api/audio/${kind}`, { profile, ...credential });
 }
 
 export function redactForLog(value: string): string {
   return value
     .replace(/(token=)[^&\s]+/gi, '$1[redacted]')
     .replace(/(ticket=)[^&\s]+/gi, '$1[redacted]')
+    .replace(/(Bearer\s+)[^\s"',}]+/gi, '$1[redacted]')
     .replace(/(password|token|secret)(["'\s:=]+)([^"'\s,}]+)/gi, '$1$2[redacted]');
 }
 
-function authHeaders(auth?: AuthSession): HeadersInit {
+function authHeaders(auth?: AuthSession): Record<string, string> {
   return auth?.mode === 'token' && auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
+}
+
+// btoa on bounded slices: spreading a whole recording into String.fromCharCode overflows the stack.
+function bytesToBase64(bytes: Uint8Array): string {
+  const slice = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += slice) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + slice));
+  }
+  return btoa(binary);
 }
 
 export class HttpError extends Error {
@@ -398,14 +494,89 @@ export class HermesApiClient {
     return json.ticket;
   }
 
-  async connectGateway(auth: AuthSession, callbacks: GatewayCallbacks): Promise<GatewayHandle> {
-    const params: Record<string, string> = {};
+  // Token mode puts the session token in the query; password/cookie mode mints a fresh one-use
+  // ticket per socket (30s TTL server side). Shared by the gateway and the audio sockets.
+  private async socketCredential(auth: AuthSession): Promise<Record<string, string>> {
     if (auth.mode === 'token') {
       if (!auth.token) throw new Error('Missing token.');
-      params.token = auth.token;
-    } else {
-      params.ticket = await this.mintWsTicket();
+      return { token: auth.token };
     }
+    return { ticket: await this.mintWsTicket() };
+  }
+
+  async audioSocketUrl(kind: AudioSocketKind, auth: AuthSession, profile: string): Promise<string> {
+    return audioWsUrl(this.baseUrl, kind, { profile, ...(await this.socketCredential(auth)) });
+  }
+
+  // Which voice engine the profile selected and whether GPT-Live can start. Any failure (older
+  // gateway without the route, network, auth) resolves to "not available" rather than throwing,
+  // except auth errors, which the caller must surface.
+  async voiceLiveStatus(auth: AuthSession, profile: string): Promise<VoiceLiveStatus> {
+    const scoped = profile.trim();
+    if (!scoped) throw new Error('An explicit profile is required for voice status.');
+    const url = endpointUrl(this.baseUrl, '/api/audio/voice-live/status');
+    url.searchParams.set('profile', scoped);
+    const unavailable = (reason: string): VoiceLiveStatus => ({ mode: 'chained', available: false, reason, model: '', voice: '' });
+    let json: { ok?: unknown; mode?: unknown; available?: unknown; reason?: unknown; model?: unknown; voice?: unknown };
+    try {
+      json = await this.get(url, auth);
+    } catch (error) {
+      if (isAuthError(error)) throw error;
+      return unavailable(error instanceof Error ? redactForLog(error.message) : 'status failed');
+    }
+    if (json.ok === false) return unavailable('status not ok');
+    return {
+      mode: json.mode === 'gpt-live' ? 'gpt-live' : 'chained',
+      available: json.available === true,
+      reason: typeof json.reason === 'string' ? json.reason : null,
+      model: typeof json.model === 'string' ? json.model : '',
+      voice: typeof json.voice === 'string' ? json.voice : '',
+    };
+  }
+
+  // Exchange the browser's WebRTC SDP offer for the GPT-Live answer. The OpenAI key never leaves the
+  // gateway. The offer is sent byte-exact (the vendor parser needs the trailing CRLF). 503 = not
+  // configured, 502 = vendor failure; both surface as HttpError for the controller to classify.
+  async voiceLiveSession(auth: AuthSession, profile: string, sdp: string, history?: VoiceLiveHistoryMessage[], signal?: AbortSignal): Promise<VoiceLiveAnswer> {
+    const scoped = profile.trim();
+    if (!scoped) throw new Error('An explicit profile is required for a live voice session.');
+    if (!sdp.trim()) throw new Error('An SDP offer is required.');
+    const url = endpointUrl(this.baseUrl, '/api/audio/voice-live/session');
+    url.searchParams.set('profile', scoped);
+    const json = await this.post<{ ok?: unknown; session?: { id?: unknown }; transport?: { type?: unknown; sdp?: unknown } }>(
+      url,
+      auth,
+      { sdp, ...(history && history.length ? { history } : {}) },
+      signal,
+    );
+    const answer = json.transport?.sdp;
+    if (json.ok === false || typeof answer !== 'string' || !answer) throw new Error('Live voice session creation failed.');
+    const id = json.session?.id;
+    return { sessionId: typeof id === 'string' ? id : null, sdp: answer };
+  }
+
+  // Batch fallback for dictation when the server has no live STT. The profile is mandatory (the STT
+  // provider and keys resolve per profile). Token mode authenticates with a Bearer header only --
+  // never the URL or body -- and password mode rides on the session cookie.
+  async transcribeAudio(auth: AuthSession, profile: string, wav: Uint8Array, signal?: AbortSignal): Promise<string> {
+    const scoped = profile.trim();
+    if (!scoped) throw new Error('An explicit profile is required for transcription.');
+    const url = endpointUrl(this.baseUrl, '/api/audio/transcribe');
+    url.searchParams.set('profile', scoped);
+    const response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(auth) },
+      body: JSON.stringify({ data_url: `data:audio/wav;base64,${bytesToBase64(wav)}`, mime_type: 'audio/wav' }),
+      signal,
+    });
+    if (!response.ok) throw await parseError(response);
+    const json = (await response.json()) as { transcript?: unknown };
+    return typeof json.transcript === 'string' ? json.transcript.trim() : '';
+  }
+
+  async connectGateway(auth: AuthSession, callbacks: GatewayCallbacks): Promise<GatewayHandle> {
+    const params = await this.socketCredential(auth);
     const socket = new WebSocket(wsUrl(this.baseUrl, params));
     const peer = new JsonRpcPeer(socket, 120_000);
     socket.addEventListener('open', () => callbacks.onOpen?.());
@@ -435,7 +606,11 @@ export class HermesApiClient {
     return {
       serverRequestMethods,
       createSession: async (selection?: RuntimeSelection) => {
+        // Verified: session.create stores an explicit `source` untouched (tui_gateway/server.py
+        // _resolve_session_source). Desktop sends 'desktop'; without it the gateway tags the row
+        // 'tui', which Desktop's sidebar does list but sorts/filters as a different client.
         const result = asRecord(await peer.request('session.create', {
+          source: 'desktop',
           ...(selection?.profile ? { profile: selection.profile } : {}),
           ...(selection?.provider ? { provider: selection.provider } : {}),
           ...(selection?.model ? { model: selection.model } : {}),
@@ -451,23 +626,13 @@ export class HermesApiClient {
         for (const event of pending) callbacks.onEvent(event);
         return resumeResultFromPayload(result, sessionId, pending);
       },
-      attachFile: async (sessionId: string, file: File) => {
-        const dataUrl = await fileToDataUrl(file);
-        const common = { session_id: sessionId, filename: file.name, name: file.name };
-        if (file.type.startsWith('image/')) {
-          const result = asRecord(await peer.request('image.attach_bytes', { ...common, content_base64: dataUrl }));
-          return { name: file.name, kind: 'image', text: String(result.text ?? `[User attached image: ${file.name}]`) };
-        }
-        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-          const result = asRecord(await peer.request('pdf.attach', { ...common, content_base64: dataUrl }));
-          return { name: file.name, kind: 'pdf', text: String(result.text ?? `[User attached PDF: ${file.name}]`) };
-        }
-        const result = asRecord(await peer.request('file.attach', { session_id: sessionId, name: file.name, path: file.name, data_url: dataUrl }));
-        const ref = String(result.ref_text ?? result.text ?? '');
-        return { name: file.name, kind: 'file', text: ref ? `[User attached file: ${file.name}]\n${ref}` : `[User attached file: ${file.name}]` };
+      attachFile: async (sessionId: string, attachment: PreparedAttachment) => {
+        const request = attachmentRequest(sessionId, attachment);
+        const result = asRecord(await peer.request(request.method, request.params));
+        return attachmentResultFromResponse(request.kind, attachment.name, result);
       },
-      submitPrompt: async (sessionId: string, prompt: string) => {
-        await peer.request('prompt.submit', { session_id: sessionId, text: prompt }, { timeoutMs: 10 * 60_000 });
+      submitPrompt: async (sessionId: string, prompt: string, options?: SubmitPromptOptions) => {
+        await peer.request('prompt.submit', submitPromptParams(sessionId, prompt, options), { timeoutMs: 10 * 60_000 });
       },
       queuePrompt: async (sessionId: string, text: string) => queueOutcomeFromResult(await peer.request('prompt.submit', queuePromptParams(sessionId, text), { timeoutMs: 60_000 })),
       steerSession: async (sessionId: string, text: string, profile?: string) => {
@@ -479,6 +644,7 @@ export class HermesApiClient {
           throw error;
         }
       },
+      interruptSession: async (sessionId: string, profile?: string) => interruptOutcomeFromResult(await peer.request('session.interrupt', { session_id: sessionId, ...(profile ? { profile } : {}) }, { timeoutMs: 30_000 })),
       respondApproval: async (sessionId: string, requestId: string, choice: 'once' | 'deny') => {
         await peer.request('approval.respond', approvalResponseParams(sessionId, requestId, choice));
       },
@@ -498,6 +664,21 @@ export class HermesApiClient {
   private async get<T>(pathOrUrl: string | URL, auth?: AuthSession): Promise<T> {
     const url = typeof pathOrUrl === 'string' ? endpointUrl(this.baseUrl, pathOrUrl) : pathOrUrl;
     const response = await fetch(url, { credentials: 'include', headers: authHeaders(auth) });
+    if (!response.ok) throw await parseError(response);
+    return (await response.json()) as T;
+  }
+
+  // Same auth rules as transcribeAudio: Bearer header only in token mode (never the URL or body),
+  // session cookie otherwise.
+  private async post<T>(pathOrUrl: string | URL, auth: AuthSession, body: unknown, signal?: AbortSignal): Promise<T> {
+    const url = typeof pathOrUrl === 'string' ? endpointUrl(this.baseUrl, pathOrUrl) : pathOrUrl;
+    const response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...authHeaders(auth) },
+      body: JSON.stringify(body),
+      signal,
+    });
     if (!response.ok) throw await parseError(response);
     return (await response.json()) as T;
   }
@@ -621,7 +802,7 @@ function relativeAbsolute(iso: string): string {
   return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-function fileToDataUrl(file: File): Promise<string> {
+export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result ?? ''));
@@ -658,6 +839,23 @@ export type SteerOutcome = { status: 'accepted' | 'rejected' | 'unsupported' | '
 
 export function queuePromptParams(sessionId: string, text: string): Record<string, JsonValue> {
   return { session_id: sessionId, text, queued: true };
+}
+
+export function submitPromptParams(sessionId: string, text: string, options?: SubmitPromptOptions): Record<string, JsonValue> {
+  const context = options?.surface === 'voice-live' ? (options.voiceContext ?? '').slice(0, 6000) : '';
+  return {
+    session_id: sessionId,
+    text,
+    ...(options?.surface ? { surface: options.surface } : {}),
+    ...(context ? { voice_context: context } : {}),
+  };
+}
+
+export function interruptOutcomeFromResult(result: JsonValue): InterruptOutcome {
+  const status = String(asRecord(result).status ?? '');
+  if (status === 'interrupted') return { status: 'interrupted' };
+  if (status === 'not_interrupted') return { status: 'not_interrupted' };
+  return { status: 'unknown', raw: status };
 }
 
 export function steerParams(sessionId: string, text: string, profile?: string): Record<string, JsonValue> {
@@ -800,7 +998,7 @@ export function attentionFromEvent(event: JsonRpcEvent): AttentionRequest | null
 
 // The installed gateway wraps every event payload under `payload` (tui_gateway/server.py
 // `_event_frame`); older/legacy frames carried fields at the top level. Read both.
-function eventText(event: JsonRpcEvent, keys: string[]): string {
+export function eventText(event: JsonRpcEvent, keys: string[]): string {
   const payload = asRecord(event.payload ?? {});
   for (const key of keys) {
     const nested = payload[key];

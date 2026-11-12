@@ -1,13 +1,27 @@
-import { ArrowLeft, Bot, CheckCircle2, ChevronDown, CircleAlert, Clock3, Lock, MessageCircle, Paperclip, Plus, Radio, RefreshCw, Search, SendHorizonal, ShieldCheck, Sparkles, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, ChevronDown, CircleAlert, Clock3, Lock, MessageCircle, Mic, Paperclip, Plus, Radio, RefreshCw, Search, SendHorizonal, Settings, ShieldCheck, Sparkles, Star, WifiOff, X } from 'lucide-react';
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { approvalActionAvailability, attentionFromEvent, clarifyServerRequestResult, shouldDeclineOnPhone, AttentionRequest, AuthCapability, AuthMode, AuthSession, ChatMessage, eventToMessages, GatewayHandle, HermesApiClient, HermesSession, HistoryPage, HttpError, isAuthError, isNotFoundError, RuntimeModelOption, RuntimeOptions, RuntimeSelection, SessionPage, normalizeServerUrl } from './lib/hermesApi';
+import { approvalActionAvailability, AttachmentResult, attentionFromEvent, clarifyServerRequestResult, shouldDeclineOnPhone, AttentionRequest, AuthCapability, AuthMode, AuthSession, ChatMessage, eventToMessages, GatewayHandle, HermesApiClient, HermesSession, HistoryPage, HttpError, isAuthError, isNotFoundError, redactForLog, PreparedAttachment, RuntimeModelOption, RuntimeOptions, RuntimeSelection, SessionPage, normalizeServerUrl, VoiceLiveStatus } from './lib/hermesApi';
+import { describeSendFailure, prepareAttachment, uploadPrepared } from './lib/attachments';
 import { MockHermesClient, starterMessages } from './lib/mockHermes';
+import { VoiceControls } from './components/VoiceControls';
+import { useVoiceController } from './hooks/useVoiceController';
+import { useLiveVoice } from './hooks/useLiveVoice';
+import { BOB_PROFILE, canPinAsBobMain, resolveBobMain } from './lib/bobMain';
+import { browserAudioEnv } from './lib/browserAudio';
+import { BrowserLiveRtcEnv } from './lib/browserLiveRtc';
+import { ChainedVoiceBackend } from './lib/chainedVoiceBackend';
+import { FakeVoiceBackend } from './lib/fakeVoiceBackend';
+import { LiveVoiceControllerDeps, toLiveHistory } from './lib/liveVoiceController';
+import { LiveVoiceSession } from './lib/liveVoiceSession';
+import { liveStateToVoiceState } from './lib/liveVoiceView';
+import type { VoiceBackend } from './lib/voiceBackend';
+import type { VoiceAction } from './lib/voiceView';
 import { MessageContent } from './components/MessageContent';
 import { compactMessagesForMobile } from './lib/mobileText';
 import { ConnectionView, deriveConnectionView } from './lib/connectionState';
 import { applyHistoryPage, beginHistoryLoad, createHistoryState, failHistoryLoad, historyPresentation, HistoryPresentation, HistoryScope, historyScopeKey, HistoryState } from './lib/history';
 import { AttentionState, beginResponse, createAttentionState, markDisconnected, markSendFailed, markSent, reconcileEvent, reconcileResume, requestKey, showAttention } from './lib/attentionState';
-import { appStorageKeys, clearContinueReference, clearRememberedToken, forgetThisDevice, loadActiveProfile, loadContinueReference, loadLoginHint, loadRememberedToken, loadServerUrl, migrateLegacyStorage, saveActiveProfile, saveContinueReference, saveLoginHint, saveRememberedToken, saveServerUrl, scopeFromServerUrl, StorageScope } from './lib/storage';
+import { appStorageKeys, BobMainReference, clearBobMainReference, clearContinueReference, clearRememberedToken, forgetThisDevice, loadActiveProfile, loadBobMainReference, loadContinueReference, loadLoginHint, loadRememberedToken, loadServerUrl, migrateLegacyStorage, saveActiveProfile, saveBobMainReference, saveContinueReference, saveLoginHint, saveRememberedToken, saveServerUrl, scopeFromServerUrl, StorageScope } from './lib/storage';
 import { admitSessionsForProfile, historyPageBelongsToScope, isProfileActionStale, resolveActiveProfile, seedNewChatSelection, sessionRowKey } from './lib/profileScope';
 
 type Client = HermesApiClient | MockHermesClient;
@@ -89,6 +103,26 @@ interface ContinueTarget {
   loaded: boolean; // true when the session is present in the loaded list page
 }
 
+type BobDialog = { kind: 'setup' } | { kind: 'stale' } | { kind: 'manage' } | { kind: 'error'; message: string };
+// Monotonic counters (open generation, profile-load generation) captured to detect later navigation.
+type NavigationMarks = { open: number; load: number };
+
+// Mock mode has no real origin; the pin gets a synthetic, clearly fake host so it still persists
+// and stays isolated from any real host's pin.
+const MOCK_BOB_SCOPE: StorageScope = { origin: 'https://mock.hermes.invalid', basePath: '', profile: BOB_PROFILE };
+
+function bobScopeFor(activeClient: Client | null): StorageScope | null {
+  if (!activeClient) return null;
+  if (activeClient.baseUrl.startsWith('mock')) return MOCK_BOB_SCOPE;
+  return scopeFromServerUrl(activeClient.baseUrl, BOB_PROFILE);
+}
+
+function createFakeVoiceBackend(): FakeVoiceBackend {
+  const backend = new FakeVoiceBackend();
+  backend.auto = { listen: true, transcript: 'Hello Bob, what is on my plate today?', deny: null, speak: true, failSpeech: false, fallbackSpeech: false };
+  return backend;
+}
+
 export function App() {
   const [screen, setScreen] = useState<Screen>('connect');
   const [connection, setConnection] = useState(initialConnection);
@@ -111,15 +145,26 @@ export function App() {
   const [liveMessages, setLiveMessages] = useState<ChatMessage[]>([]);
   const [attention, setAttention] = useState<AttentionState>(() => createAttentionState(''));
   const [composer, setComposer] = useState('');
-  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachments, setAttachments] = useState<PreparedAttachment[]>([]);
+  const [preparing, setPreparing] = useState<{ key: number; names: string[] }[]>([]);
   const [chatStatus, setChatStatus] = useState<ChatStatus>('disconnected');
   const [banner, setBanner] = useState('');
   const [lineageNote, setLineageNote] = useState('');
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [bobRef, setBobRef] = useState<BobMainReference | null>(null);
+  const [bobBusy, setBobBusy] = useState(false);
+  const [bobDialog, setBobDialog] = useState<BobDialog | null>(null);
   const gatewayRef = useRef<GatewayHandle | null>(null);
   const liveSessionIdRef = useRef<string>('');
+  const [liveSessionId, setLiveSessionIdState] = useState('');
   const historySessionRef = useRef<HermesSession | null>(null);
   const scopeKeyRef = useRef<string>('');
   const openGenerationRef = useRef(0);
+  const openedIdRef = useRef('');
+  const voiceRef = useRef<ReturnType<typeof useVoiceController> | null>(null);
+  const liveVoiceRef = useRef<ReturnType<typeof useLiveVoice> | null>(null);
+  const liveMessagesRef = useRef<ChatMessage[]>([]);
+  const submitLiveVoiceRef = useRef<(sessionId: string, text: string, voiceContext: string) => Promise<void>>(async () => { throw new Error('Not connected.'); });
   const sessionLoadGenerationRef = useRef(0);
   const activeProfileRef = useRef(activeProfile);
   const historyRef = useRef<HistoryState | null>(null);
@@ -132,6 +177,11 @@ export function App() {
   const composerRef = useRef<HTMLFormElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Bumped whenever prepared attachments are discarded; late preparation results from an older epoch are ignored.
+  const attachmentEpochRef = useRef(0);
+  const preparingKeyRef = useRef(0);
+  // Gateway-accepted uploads per live session, so a retry after a failed prompt.submit does not attach twice.
+  const uploadedAttachmentsRef = useRef(new Map<string, AttachmentResult>());
 
   const autoRestoreStarted = useRef(false);
 
@@ -175,6 +225,17 @@ export function App() {
       return null;
     }
   }
+
+  function clearAttachments() {
+    attachmentEpochRef.current += 1;
+    uploadedAttachmentsRef.current.clear();
+    setAttachments([]);
+    setPreparing([]);
+  }
+
+  // Prepared attachments belong to one open chat: leaving it (other session, profile, sessions list,
+  // sign-out, forget device) discards them and ignores any read still in flight.
+  useEffect(() => { clearAttachments(); }, [activeSession?.id, screen]);
 
   useEffect(() => {
     if (autoRestoreStarted.current) return;
@@ -299,6 +360,17 @@ export function App() {
     updateComposerHeight();
     const observer = new ResizeObserver(updateComposerHeight);
     observer.observe(composerRef.current);
+    return () => observer.disconnect();
+  }, [screen]);
+
+  // The transcript area changes height when the voice panel opens/closes or its captions wrap. If the
+  // reader was following the tail (e.g. an approval card), keep following it.
+  useEffect(() => {
+    if (screen !== 'chat' || !messagesRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current && messagesRef.current) messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    });
+    observer.observe(messagesRef.current);
     return () => observer.disconnect();
   }, [screen]);
 
@@ -469,6 +541,10 @@ export function App() {
     const removed = forgetThisDevice();
     setHasLocalData(false);
     gatewayRef.current?.close();
+    clearAttachments();
+    setBobRef(null);
+    setBobDialog(null);
+    setVoiceOpen(false);
     setClient(null);
     setAuth(null);
     setSessions([]);
@@ -537,11 +613,14 @@ export function App() {
     }
   }
 
-  async function switchActiveProfile(profile: string) {
+  // `onStarted` reports the generations this switch itself produced (synchronously, before any await),
+  // so a caller can tell its own bumps from the user navigating while the switch is still loading.
+  async function switchActiveProfile(profile: string, onStarted?: (marks: NavigationMarks) => void) {
     if (!client || !auth || profile === activeProfileRef.current || !runtimeOptions.profiles.includes(profile)) return;
     const generation = sessionLoadGenerationRef.current + 1;
     sessionLoadGenerationRef.current = generation;
     openGenerationRef.current += 1;
+    onStarted?.({ open: openGenerationRef.current, load: generation });
     closeGateway();
     activeProfileRef.current = profile;
     setActiveProfile(profile);
@@ -557,7 +636,7 @@ export function App() {
     setLiveMessages([]);
     setAttention(createAttentionState(''));
     setComposer('');
-    setAttachments([]);
+    clearAttachments();
     setBanner('Loading conversations…');
     setSessionsLoading(true);
     const hostScope = scopeFromServerUrl(client.baseUrl);
@@ -632,6 +711,13 @@ export function App() {
     }
   }
 
+  // The live gateway session id: what message frames are tagged with and what voice must match.
+  // Mirrored into state so the voice scope follows it (the ref alone would not re-render).
+  function setLiveSessionId(id: string) {
+    liveSessionIdRef.current = id;
+    setLiveSessionIdState(id);
+  }
+
   function closeGateway() {
     gatewayRef.current?.close();
     gatewayRef.current = null;
@@ -640,10 +726,123 @@ export function App() {
   function backToSessions() {
     openGenerationRef.current += 1;
     closeGateway();
+    clearAttachments();
+    setVoiceOpen(false);
     setScreen('sessions');
   }
 
-  async function openSession(session: HermesSession) {
+  // Connect the socket and resume the exact stored session. Shared by the first open and by the
+  // single bounded reconnect; `mode` only changes the status copy. Never re-sends prompts.
+  async function attachGateway(generation: number, scopeKey: string, target: HermesSession, mode: 'open' | 'reconnect') {
+    if (!client || !auth) return;
+    const stale = () => generation !== openGenerationRef.current;
+    const gateway = await client.connectGateway(auth, {
+      onOpen: () => { if (!stale()) setChatStatus((current) => current === 'connecting' ? 'resuming' : current); },
+      onClose: () => {
+        if (stale()) return;
+        setChatStatus('lost');
+        setAttention((current) => markDisconnected(current));
+        setBanner('Connection lost. Nothing was re-sent.');
+        voiceRef.current?.gatewayLost(); // the voice turn belongs to the dropped connection
+        liveVoiceRef.current?.gatewayLost();
+        // A drop while the page is visible gets one immediate bounded reconnect; a drop while
+        // backgrounded (iOS freezes the page, the server's ping times out) reconnects on return.
+        if (document.visibilityState === 'visible') void reconnectOnceRef.current('closed');
+      },
+      onError: (error) => { if (!stale()) { setChatStatus('error'); setBanner(redactForLog(error.message)); voiceRef.current?.gatewayLost(); liveVoiceRef.current?.gatewayLost(); } },
+      onEvent: (gatewayEvent) => {
+        if (stale()) return;
+        const request = attentionFromEvent(gatewayEvent);
+        setAttention((current) => {
+          const next = request ? showAttention(current, request, scopeKey) : current;
+          return reconcileEvent(next, gatewayEvent, scopeKey);
+        });
+        setLiveMessages((current) => eventToMessages(gatewayEvent, current));
+        voiceRef.current?.gatewayEvent(gatewayEvent);
+        liveVoiceRef.current?.gatewayEvent(gatewayEvent);
+        if (gatewayEvent.type === 'message.start' || gatewayEvent.type === 'message.delta') setChatStatus((current) => current === 'ready' ? 'running' : current);
+        if (gatewayEvent.type === 'message.complete') setChatStatus('ready');
+      },
+    });
+    if (stale()) { gateway.close(); return; }
+    gatewayRef.current = gateway;
+    setChatStatus('resuming');
+    const resume = await gateway.resumeSession(target.id, target.profile);
+    if (stale()) return;
+    setLiveSessionId(resume.sessionId || target.id);
+    // Requests that arrived on this fresh connection (during resume) are live by
+    // definition; only a response we already sent needs reconciling against open keys.
+    setAttention((current) => {
+      const liveKey = current.phase === 'waiting' ? requestKey(current.request) : undefined;
+      return reconcileResume(current, liveKey ? [...resume.openRequestKeys, liveKey] : resume.openRequestKeys, scopeKey);
+    });
+    setActiveSession(target);
+    setChatStatus(resume.running ? 'running' : 'ready');
+    if (mode === 'reconnect') {
+      setBanner('');
+      void refreshHistory({ quiet: true });
+    }
+  }
+
+  // Bounded reconnect: at most two attempts per trigger (the network is often not back the
+  // instant a phone thaws), a short grace before each, cancelled by navigation (generation),
+  // finite socket timeout, never a loop. Auth failure stops here and asks for sign-in.
+  const RECONNECT_DELAYS_MS = [1_500, 5_000];
+  const reconnectingRef = useRef(false);
+  const reconnectOnceRef = useRef<(trigger: 'closed' | 'foreground' | 'manual') => Promise<void>>(async () => {});
+  async function reconnectOnce(trigger: 'closed' | 'foreground' | 'manual') {
+    if (reconnectingRef.current || !client || !auth || screenRef.current !== 'chat') return;
+    const target = historySessionRef.current;
+    if (!target || target.id.startsWith('new-')) return;
+    const generation = openGenerationRef.current;
+    const scopeKey = scopeKeyRef.current;
+    reconnectingRef.current = true;
+    closeGateway();
+    setChatStatus('connecting');
+    setBanner(trigger === 'manual' ? 'Reconnecting…' : 'Connection lost. Reconnecting…');
+    const delays = trigger === 'manual' ? [0, RECONNECT_DELAYS_MS[1]] : RECONNECT_DELAYS_MS;
+    try {
+      for (let attempt = 0; attempt < delays.length; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, delays[attempt]));
+        if (generation !== openGenerationRef.current || document.visibilityState !== 'visible') return;
+        try {
+          await attachGateway(generation, scopeKey, target, 'reconnect');
+          return;
+        } catch (error) {
+          if (generation !== openGenerationRef.current) return;
+          if (isAuthError(error) || attempt === delays.length - 1) {
+            setChatStatus('lost');
+            setBanner(`Couldn’t reconnect: ${handleAuthFailure(error, 'network error')}`);
+            return;
+          }
+          setBanner('Still reconnecting…');
+        }
+      }
+    } finally {
+      reconnectingRef.current = false;
+    }
+  }
+
+  reconnectOnceRef.current = reconnectOnce;
+  const screenRef = useRef<Screen>(screen);
+  screenRef.current = screen;
+
+  useEffect(() => {
+    if (screen !== 'chat') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && (chatStatus === 'lost' || chatStatus === 'disconnected')) void reconnectOnce('foreground');
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+    };
+  }, [screen, chatStatus, client, auth]);
+
+  async function openSession(session: HermesSession, options: { openVoice?: boolean } = {}) {
     if (!client || !auth) return;
     if (admitSessionsForProfile([session], activeProfileRef.current).length !== 1) {
       setBanner('Switch to this conversation’s profile before opening it.');
@@ -654,7 +853,9 @@ export function App() {
     sessionListScrollRef.current = sessionListRef.current?.scrollTop ?? 0;
     closeGateway();
     historySessionRef.current = session;
-    liveSessionIdRef.current = session.id;
+    setLiveSessionId(session.id);
+    openedIdRef.current = session.id;
+    setVoiceOpen(Boolean(options.openVoice));
     const scope = historyScopeFor(session, client);
     const scopeKey = historyScopeKey(scope);
     scopeKeyRef.current = scopeKey;
@@ -691,42 +892,8 @@ export function App() {
         setHistory((state) => state ? { ...applyHistoryPage(state, { sessionId: session.id, messages: starterMessages(session), limit: HISTORY_PAGE_SIZE, offset: 0, returned: 0, reachedBeginning: true }, scopeKey, 'initial') } : state);
       }
       if (stale()) return;
-      const gateway = await client.connectGateway(auth, {
-        onOpen: () => { if (!stale()) setChatStatus((current) => current === 'connecting' ? 'resuming' : current); },
-        onClose: () => {
-          if (stale()) return;
-          setChatStatus('lost');
-          setAttention((current) => markDisconnected(current));
-          setBanner('Connection lost. Reopen the session to reconnect; nothing was re-sent.');
-        },
-        onError: (error) => { if (!stale()) { setChatStatus('error'); setBanner(error.message); } },
-        onEvent: (gatewayEvent) => {
-          if (stale()) return;
-          const request = attentionFromEvent(gatewayEvent);
-          setAttention((current) => {
-            const next = request ? showAttention(current, request, scopeKey) : current;
-            return reconcileEvent(next, gatewayEvent, scopeKey);
-          });
-          setLiveMessages((current) => eventToMessages(gatewayEvent, current));
-          if (gatewayEvent.type === 'message.start' || gatewayEvent.type === 'message.delta') setChatStatus((current) => current === 'ready' ? 'running' : current);
-          if (gatewayEvent.type === 'message.complete') setChatStatus('ready');
-        },
-      });
-      if (stale()) { gateway.close(); return; }
-      gatewayRef.current = gateway;
-      setChatStatus('resuming');
-      const resumeTarget = historySessionRef.current ?? session;
-      const resume = await gateway.resumeSession(resumeTarget.id, resumeTarget.profile);
+      await attachGateway(generation, scopeKey, historySession, 'open');
       if (stale()) return;
-      liveSessionIdRef.current = resume.sessionId || resumeTarget.id;
-      // Requests that arrived on this fresh connection (during resume) are live by
-      // definition; only a response we already sent needs reconciling against open keys.
-      setAttention((current) => {
-        const liveKey = current.phase === 'waiting' ? requestKey(current.request) : undefined;
-        return reconcileResume(current, liveKey ? [...resume.openRequestKeys, liveKey] : resume.openRequestKeys, scopeKey);
-      });
-      setActiveSession(resumeTarget);
-      setChatStatus(resume.running ? 'running' : 'ready');
       const storageScope = currentScope(session, client);
       if (storageScope) {
         saveContinueReference(storageScope, { sessionId: session.id, title: session.title });
@@ -757,7 +924,9 @@ export function App() {
     const generation = openGenerationRef.current + 1;
     openGenerationRef.current = generation;
     closeGateway();
-    liveSessionIdRef.current = session.id;
+    setLiveSessionId(session.id);
+    openedIdRef.current = session.id;
+    setVoiceOpen(false);
     setActiveSession(session);
     setHistory(null);
     setLiveMessages([]);
@@ -770,13 +939,15 @@ export function App() {
     try {
       const gateway = await client.connectGateway(auth, {
         onOpen: () => { if (!stale()) setChatStatus('ready'); },
-        onClose: () => { if (!stale()) { setChatStatus('lost'); setAttention((current) => markDisconnected(current)); } },
-        onError: (error) => { if (!stale()) { setChatStatus('error'); setBanner(error.message); } },
+        onClose: () => { if (!stale()) { setChatStatus('lost'); setAttention((current) => markDisconnected(current)); voiceRef.current?.gatewayLost(); liveVoiceRef.current?.gatewayLost(); } },
+        onError: (error) => { if (!stale()) { setChatStatus('error'); setBanner(redactForLog(error.message)); voiceRef.current?.gatewayLost(); liveVoiceRef.current?.gatewayLost(); } },
         onEvent: (gatewayEvent) => {
           if (stale()) return;
           const request = attentionFromEvent(gatewayEvent);
           setAttention((current) => reconcileEvent(request ? showAttention(current, request, scopeKeyRef.current) : current, gatewayEvent, scopeKeyRef.current));
           setLiveMessages((current) => eventToMessages(gatewayEvent, current));
+          voiceRef.current?.gatewayEvent(gatewayEvent);
+          liveVoiceRef.current?.gatewayEvent(gatewayEvent);
           if (gatewayEvent.type === 'message.complete') setChatStatus('ready');
         },
       });
@@ -786,9 +957,10 @@ export function App() {
       const createdIds = await gateway.createSession(selectedRuntime);
       if (stale()) return;
       const id = createdIds.storedId;
+      openedIdRef.current = id;
       const created = { ...session, id, profile: selectedRuntime.profile };
       historySessionRef.current = created;
-      liveSessionIdRef.current = createdIds.liveId || id;
+      setLiveSessionId(createdIds.liveId || id);
       const scope = historyScopeFor(created, client);
       scopeKeyRef.current = historyScopeKey(scope);
       setAttention(createAttentionState(scopeKeyRef.current));
@@ -872,40 +1044,281 @@ export function App() {
 
   const composerBlockedByAttention = attention.phase === 'waiting' || attention.phase === 'submitting';
   const canSendNow = chatStatus === 'ready' && !composerBlockedByAttention;
-  const canEngageRunning = chatStatus === 'running' && !composerBlockedByAttention && attachments.length === 0;
+  const canEngageRunning = chatStatus === 'running' && !composerBlockedByAttention && attachments.length === 0 && preparing.length === 0;
+
+  // ---- Voice: a mode of the open ordinary chat. The text session stays authoritative. ----
+  const voiceBackend = useMemo<VoiceBackend | null>(() => {
+    if (!client || !auth) return null;
+    if (!('audioSocketUrl' in client)) return createFakeVoiceBackend();
+    return new ChainedVoiceBackend({
+      audio: browserAudioEnv(),
+      socketUrl: (kind, profile) => client.audioSocketUrl(kind, auth, profile),
+      transcribeBatch: (profile, wav, signal) => client.transcribeAudio(auth, profile, wav, signal),
+    });
+  }, [client, auth]);
+
+  useEffect(() => {
+    if (!(voiceBackend instanceof FakeVoiceBackend)) return undefined;
+    (window as unknown as { __fakeVoice?: FakeVoiceBackend }).__fakeVoice = voiceBackend;
+    return () => { delete (window as unknown as { __fakeVoice?: FakeVoiceBackend }).__fakeVoice; };
+  }, [voiceBackend]);
+
+  // ---- Live voice (GPT-Live): chosen only when the gateway says it is available for this profile.
+  // Anything else (older gateway, chained mode, no OpenAI key, mock client) stays on chained voice.
+  const [liveVoiceStatus, setLiveVoiceStatus] = useState<VoiceLiveStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLiveVoiceStatus(null);
+    if (!client || !auth || !('voiceLiveStatus' in client)) return undefined;
+    client.voiceLiveStatus(auth, activeProfile).then(
+      (status) => { if (!cancelled) setLiveVoiceStatus(status); },
+      (error) => { if (!cancelled && isAuthError(error)) setBanner(handleAuthFailure(error, 'Session expired.')); },
+    );
+    return () => { cancelled = true; };
+  }, [client, auth, activeProfile]);
+  const liveEngine = liveVoiceStatus?.available === true && liveVoiceStatus.mode === 'gpt-live';
+  liveMessagesRef.current = liveMessages;
+
+  const liveRtcEnv = useMemo(() => (liveEngine ? new BrowserLiveRtcEnv() : null), [liveEngine]);
+  const liveVoiceDeps = useMemo<Omit<LiveVoiceControllerDeps, 'onState'> | null>(() => {
+    if (!client || !auth || !liveRtcEnv || !('voiceLiveSession' in client)) return null;
+    return {
+      createSession: (handlers) => new LiveVoiceSession(liveRtcEnv, handlers),
+      exchange: (scope, sdp) => client.voiceLiveSession(auth, scope.profile, sdp, toLiveHistory(liveMessagesRef.current)),
+      submit: (sessionId, text, voiceContext) => submitLiveVoiceRef.current(sessionId, text, voiceContext),
+      steer: async (sessionId, text) => {
+        const gateway = gatewayRef.current;
+        if (!gateway) throw new Error('Not connected.');
+        return gateway.steerSession(sessionId, text, activeProfileRef.current);
+      },
+      interrupt: async (sessionId) => {
+        const gateway = gatewayRef.current;
+        if (!gateway?.interruptSession) return { status: 'unknown' as const };
+        return gateway.interruptSession(sessionId, activeProfileRef.current);
+      },
+    };
+  }, [client, auth, liveRtcEnv]);
+
+  // The scope's sessionId is the live gateway id (what message frames are tagged with), not the
+  // durable history key, so voice can match frames exactly.
+  const voiceScope = screen === 'chat' && activeSession && !activeSession.id.startsWith('new-') && liveSessionId
+    ? { profile: activeSession.profile?.trim() || activeProfile, sessionId: liveSessionId }
+    : null;
+  const voiceBlockedReason = !voiceScope
+    ? 'Voice is available once the chat is ready.'
+    : composerBlockedByAttention
+      ? 'Answer the pending request above first.'
+      : chatStatus === 'running' && !liveEngine // live voice keeps talking while Bob works (steer/queue routing)
+        ? 'Hermes is working. Voice is available when this turn finishes.'
+        : chatStatus === 'lost' || chatStatus === 'disconnected'
+          ? 'Reconnect to use voice.'
+          : chatStatus !== 'ready' && !(liveEngine && chatStatus === 'running')
+            ? 'Voice is available once the chat is ready.'
+            : '';
+
+  // Same submit path as the text composer: the live session through GatewayHandle.submitPrompt, with
+  // the same busy/attention gating, so the turn lands in ordinary history and stays resumable.
+  async function submitVoicePrompt(text: string): Promise<void> {
+    const gateway = gatewayRef.current;
+    if (!activeSession || !gateway) throw new Error('Not connected. Nothing was sent.');
+    if (voiceBlockedReason || !canSendNow) throw new Error(`${voiceBlockedReason || 'Hermes is not ready.'} Nothing was sent.`);
+    const generation = openGenerationRef.current;
+    const sessionId = liveSessionIdRef.current || activeSession.id;
+    setChatStatus('running');
+    setLiveMessages((current) => [...current, { id: `user-${Date.now()}`, role: 'user', text, state: 'complete' }]);
+    setBanner('');
+    stickToBottomRef.current = true;
+    try {
+      await gateway.submitPrompt(sessionId, text);
+    } catch (error) {
+      if (generation === openGenerationRef.current) {
+        setChatStatus('error');
+        setBanner(`Not sent: ${error instanceof Error ? error.message : 'Prompt submit failed.'}`);
+      }
+      throw error;
+    }
+  }
+
+  // A live-voice delegation: same prompt.submit path and local user bubble as the composer, tagged
+  // `surface: 'voice-live'` with the bounded spoken context, on the pinned live session only.
+  async function submitLiveVoiceDelegation(sessionId: string, text: string, voiceContext: string): Promise<void> {
+    const gateway = gatewayRef.current;
+    if (!activeSession || !gateway) throw new Error('Not connected. Nothing was sent.');
+    if (composerBlockedByAttention) throw new Error('Answer the pending request first. Nothing was sent.');
+    if (sessionId !== (liveSessionIdRef.current || activeSession.id)) throw new Error('Voice is bound to a different chat. Nothing was sent.');
+    const generation = openGenerationRef.current;
+    setChatStatus('running');
+    setLiveMessages((current) => [...current, { id: `user-${Date.now()}`, role: 'user', text, state: 'complete', meta: 'voice' }]);
+    setBanner('');
+    stickToBottomRef.current = true;
+    try {
+      await gateway.submitPrompt(sessionId, text, { surface: 'voice-live', voiceContext });
+    } catch (error) {
+      if (generation === openGenerationRef.current) {
+        setChatStatus('error');
+        setBanner(`Not sent: ${error instanceof Error ? error.message : 'Prompt submit failed.'}`);
+      }
+      throw error;
+    }
+  }
+  submitLiveVoiceRef.current = submitLiveVoiceDelegation;
+
+  const voice = useVoiceController({
+    backend: voiceBackend,
+    submitText: submitVoicePrompt,
+    onSubmitFailed: (text) => setComposer((current) => current || text),
+  });
+  voiceRef.current = voice;
+  const liveVoice = useLiveVoice({ deps: liveVoiceDeps });
+  liveVoiceRef.current = liveVoice;
+
+  useEffect(() => {
+    voice.scopeChanged(voiceScope);
+    liveVoice.scopeChanged(voiceScope);
+  }, [voiceScope?.profile, voiceScope?.sessionId, voice.scopeChanged, liveVoice.scopeChanged]);
+
+  function onVoiceAction(action: VoiceAction) {
+    if (liveEngine) {
+      if (action === 'start') {
+        liveRtcEnv?.unlock(); // inside the tap
+        if (voiceScope) liveVoice.start(voiceScope);
+      } else if (action === 'interrupt') {
+        liveVoice.stopSpeaking();
+      } else {
+        liveVoice.stop();
+      }
+      return;
+    }
+    if (action === 'start') {
+      if (voiceScope) voice.start(voiceScope);
+    } else if (action === 'stop') {
+      voice.stop();
+    } else {
+      voice.interrupt();
+    }
+  }
+
+  function toggleVoice() {
+    if (voiceOpen) {
+      voice.reset();
+      liveVoice.reset();
+      setVoiceOpen(false);
+      return;
+    }
+    setVoiceOpen(true);
+  }
+
+  // ---- Bob main: an explicitly pinned default-profile session; never guessed, never created. ----
+  useEffect(() => {
+    const scope = bobScopeFor(client);
+    setBobRef(scope ? loadBobMainReference(scope) : null);
+  }, [client]);
+
+  const inDefaultChat = screen === 'chat' && canPinAsBobMain(activeSession) && (activeSession?.profile?.trim() || activeProfile) === BOB_PROFILE;
+  const isCurrentBob = Boolean(bobRef && activeSession && (bobRef.sessionId === activeSession.id || bobRef.sessionId === openedIdRef.current));
+
+  function toggleBobMain() {
+    const scope = bobScopeFor(client);
+    if (!scope || !activeSession) return;
+    if (isCurrentBob) {
+      clearBobMainReference(scope);
+      setBobRef(null);
+      setBanner('Bob main pin removed.');
+      return;
+    }
+    const sessionId = openedIdRef.current && !openedIdRef.current.startsWith('new-') ? openedIdRef.current : activeSession.id;
+    if (saveBobMainReference(scope, { sessionId, title: activeSession.title })) {
+      setBobRef(loadBobMainReference(scope));
+      setBanner('Bob main set to this chat. Talk to Bob on Conversations opens it.');
+    }
+  }
+
+  function clearBobMain() {
+    const scope = bobScopeFor(client);
+    if (scope) clearBobMainReference(scope);
+    setBobRef(null);
+    setBobDialog(null);
+  }
+
+  async function chooseBobChat() {
+    setBobDialog(null);
+    if (activeProfileRef.current !== BOB_PROFILE) await switchActiveProfile(BOB_PROFILE);
+  }
+
+  async function talkToBob() {
+    if (!client || !auth || bobBusy) return;
+    const scope = bobScopeFor(client);
+    const reference = scope ? loadBobMainReference(scope) : null;
+    if (!reference) {
+      setBobDialog({ kind: 'setup' });
+      return;
+    }
+    voice.unlockAudio(); // still inside the tap: the only moment mobile Safari lets audio start
+    liveRtcEnv?.unlock();
+    setBobBusy(true);
+    setBanner('');
+    // The intent is exactly this tap: any open-generation, profile-load-generation or screen change after
+    // it (including while the profile switch below is still loading) is the user navigating, so it is dropped.
+    const startScreen = screenRef.current;
+    let marks: NavigationMarks = { open: openGenerationRef.current, load: sessionLoadGenerationRef.current };
+    const superseded = () => marks.open !== openGenerationRef.current || marks.load !== sessionLoadGenerationRef.current || startScreen !== screenRef.current;
+    try {
+      if (activeProfileRef.current !== BOB_PROFILE) {
+        let switching = false;
+        await switchActiveProfile(BOB_PROFILE, (own) => { marks = own; switching = true; });
+        if (switching && superseded()) return;
+        if (!switching || activeProfileRef.current !== BOB_PROFILE) {
+          setBobDialog({ kind: 'error', message: 'Could not switch to the default profile, so Bob was not opened.' });
+          return;
+        }
+      }
+      const resolution = await resolveBobMain(reference, (target) => client.sessionDetail(auth, target));
+      if (superseded() || activeProfileRef.current !== BOB_PROFILE) return;
+      if (resolution.kind === 'ok') {
+        await openSession(resolution.session, { openVoice: true });
+      } else if (resolution.kind === 'stale' || resolution.kind === 'none') {
+        setBobDialog({ kind: 'stale' });
+      } else if (resolution.authExpired) {
+        setBanner(handleAuthFailure(new HttpError(resolution.message, 401), resolution.message));
+      } else {
+        setBobDialog({ kind: 'error', message: resolution.message });
+      }
+    } finally {
+      setBobBusy(false);
+    }
+  }
 
   async function submitPrompt(event: FormEvent) {
     event.preventDefault();
     const text = composer.trim();
-    if ((!text && attachments.length === 0) || !activeSession || !gatewayRef.current || !canSendNow) return;
-    const files = attachments;
+    if ((!text && attachments.length === 0) || !activeSession || !gatewayRef.current || !canSendNow || preparing.length > 0) return;
+    const items = attachments;
     const generation = openGenerationRef.current;
     const gateway = gatewayRef.current;
+    let uploadedCount = 0;
     setComposer('');
     setAttachments([]);
     setChatStatus('running');
     try {
       const sessionId = liveSessionIdRef.current || activeSession.id;
-      const attachmentRefs = [];
-      for (const file of files) {
-        setBanner(`Uploading ${file.name}…`);
-        attachmentRefs.push(await gateway.attachFile(sessionId, file));
-      }
+      const attachmentRefs = await uploadPrepared(sessionId, items, uploadedAttachmentsRef.current, (id, item) => gateway.attachFile(id, item), (item) => setBanner(`Uploading ${item.name}…`));
+      uploadedCount = attachmentRefs.length;
       if (generation !== openGenerationRef.current) return;
-      const visibleText = [text, ...files.map((file) => `📎 ${file.name}`)].filter(Boolean).join('\n');
+      const visibleText = [text, ...items.map((item) => `📎 ${item.name}`)].filter(Boolean).join('\n');
       setLiveMessages((current) => [...current, { id: `user-${Date.now()}`, role: 'user', text: visibleText, state: 'complete' }]);
       setBanner('');
       stickToBottomRef.current = true;
       const promptText = [text, ...attachmentRefs.map((file) => file.text)].filter(Boolean).join('\n\n') || 'Please review the attached file(s).';
       await gateway.submitPrompt(sessionId, promptText);
+      uploadedAttachmentsRef.current.clear();
     } catch (error) {
       if (generation !== openGenerationRef.current) return;
+      const failure = describeSendFailure(error, { attachmentCount: items.length, uploadedCount });
       setChatStatus('error');
-      const message = error instanceof Error ? error.message : 'Prompt submit failed.';
-      setBanner(files.length ? `Attachment/send failed: ${message}` : `Not sent: ${message}`);
+      setBanner(failure.banner);
       setComposer(text);
-      setAttachments(files);
-      setLiveMessages((current) => [...current, { id: `err-${Date.now()}`, role: 'status', text: files.length ? 'Attachment upload failed. File(s) restored in the composer; nothing was sent.' : 'Prompt was not sent. Your draft is restored.', state: 'error' }]);
+      setAttachments(items);
+      setLiveMessages((current) => [...current, { id: `err-${Date.now()}`, role: 'status', text: failure.status, state: 'error' }]);
     }
   }
 
@@ -954,11 +1367,28 @@ export function App() {
     }
   }
 
+  // Snapshot every picked file's bytes right here, while the OS still serves the handle (iOS can
+  // revoke it shortly after selection). Only fully read files become chips; Send waits for the reads.
   function onFilesSelected(files: FileList | null) {
     if (!files?.length) return;
     const selected = Array.from(files);
-    setAttachments((current) => [...current, ...selected]);
+    const epoch = attachmentEpochRef.current;
+    const key = ++preparingKeyRef.current;
+    const reads = selected.map((file) => prepareAttachment(file));
     if (fileInputRef.current) fileInputRef.current.value = '';
+    setPreparing((current) => [...current, { key, names: selected.map((file) => file.name) }]);
+    void Promise.allSettled(reads).then((settled) => {
+      if (epoch !== attachmentEpochRef.current) return;
+      const ready: PreparedAttachment[] = [];
+      const problems: string[] = [];
+      settled.forEach((outcome, index) => {
+        if (outcome.status === 'fulfilled') ready.push(outcome.value);
+        else problems.push(outcome.reason instanceof Error && outcome.reason.name === 'AttachmentPrepareError' ? outcome.reason.message : `Could not attach ${selected[index].name.split(/[\\/]/).pop()}.`);
+      });
+      setPreparing((current) => current.filter((entry) => entry.key !== key));
+      if (ready.length) setAttachments((current) => [...current, ...ready]);
+      if (problems.length) setBanner(problems.join(' '));
+    });
   }
 
   const canLoadMore = !sessionFilter && typeof sessionPage.total === 'number' && sessions.length < sessionPage.total;
@@ -1006,6 +1436,16 @@ export function App() {
           <section className="sessions-screen">
             <div className="session-summary"><strong>{sessions.length}</strong><span>{typeof sessionPage.total === 'number' ? ` of ${sessionPage.total} conversations loaded` : ' conversations loaded'}</span></div>
             {banner && <div className="inline-banner"><WifiOff size={16} /> {banner}</div>}
+            <div className="bob-shortcut">
+              <button type="button" className="bob-talk" onClick={() => void talkToBob()} disabled={bobBusy} aria-label={bobBusy ? 'Opening Bob…' : bobRef ? 'Talk to Bob' : 'Set up Talk to Bob'}>
+                <span className="bob-talk-icon" aria-hidden="true"><Mic size={22} /></span>
+                <span className="bob-talk-copy">
+                  <strong>{bobBusy ? 'Opening Bob…' : bobRef ? 'Talk to Bob' : 'Set up Talk to Bob'}</strong>
+                  <small>{bobRef ? (bobRef.title || 'Your pinned main chat') : 'Pin your main chat once'}</small>
+                </span>
+              </button>
+              {bobRef && <button type="button" className="icon-btn bob-settings" aria-label="Bob main settings" onClick={() => setBobDialog({ kind: 'manage' })}><Settings size={18} /></button>}
+            </div>
             <div className="profile-switcher">
               <CustomSelect
                 label="Active profile"
@@ -1038,6 +1478,8 @@ export function App() {
                 <button type="button" className="load-older" onClick={loadOlderMessages} disabled={history.load !== 'idle'}>{history.load === 'older' ? 'Loading older…' : 'Load older messages'}</button>
               )}
               <button type="button" className="refresh-chat" onClick={() => refreshHistory()} disabled={!history || history.load !== 'idle'}><RefreshCw size={15} /> Refresh transcript</button>
+              <button type="button" className={`voice-toggle ${voiceOpen ? 'on' : ''}`} aria-pressed={voiceOpen} aria-label={voiceOpen ? 'Close voice' : 'Open voice'} onClick={toggleVoice}><Mic size={15} /> Voice</button>
+              {inDefaultChat && <button type="button" className={`bob-pin ${isCurrentBob ? 'on' : ''}`} aria-pressed={isCurrentBob} aria-label={isCurrentBob ? 'Remove Bob main pin' : 'Set as Bob main'} onClick={toggleBobMain}><Star size={15} /> {isCurrentBob ? 'Bob main' : 'Set as Bob main'}</button>}
             </div>
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
               {lineageNote && <div className="history-state" role="status">{lineageNote}</div>}
@@ -1051,11 +1493,14 @@ export function App() {
               {!attentionActive && attention.note && (attention.phase === 'resolved' || attention.phase === 'cancelled' || attention.phase === 'disconnected') && <div className={`history-state ${attention.phase === 'disconnected' ? 'bad' : 'subtle'}`} role="status" data-attention={attention.phase}>{attention.note}</div>}
               <div ref={messagesEndRef} />
             </div>
+            {voiceOpen && (liveEngine
+              ? <VoiceControls state={liveStateToVoiceState(liveVoice.state)} capability={{ supported: true }} canStart={voiceBlockedReason === ''} blockedReason={voiceBlockedReason} live onAction={onVoiceAction} />
+              : <VoiceControls state={voice.state} capability={voice.capability} canStart={voiceBlockedReason === ''} blockedReason={voiceBlockedReason} onAction={onVoiceAction} />)}
             <form ref={composerRef} className={`composer ${chatStatus === 'running' ? 'running' : ''}`} onSubmit={submitPrompt}>
               {composerBlockedByAttention && <div className="composer-hint" role="status">Answer the pending request above first. Ordinary messages don’t resolve it.</div>}
               {chatStatus === 'running' && !composerBlockedByAttention && <div className="composer-hint" role="status">Hermes is working. Queue runs after this turn; Steer nudges the current turn.{attachments.length ? ' Remove attachments to use these.' : ''}</div>}
-              {(chatStatus === 'lost' || chatStatus === 'disconnected') && <div className="composer-hint bad" role="status">Connection lost. Go back and reopen the session; your draft stays here.</div>}
-              {attachments.length > 0 && <div className="attachment-tray">{attachments.map((file, index) => <span className="attachment-chip" key={`${file.name}-${file.size}-${index}`}><span className="attachment-name">📎 {file.name}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={13} /></button></span>)}</div>}
+              {(chatStatus === 'lost' || chatStatus === 'disconnected') && <div className="composer-hint bad" role="status">Connection lost; your draft stays here. <button type="button" className="link-btn" onClick={() => void reconnectOnce('manual')}>Reconnect</button></div>}
+              {(attachments.length > 0 || preparing.length > 0) && <div className="attachment-tray">{attachments.map((file) => <span className="attachment-chip" key={file.id}><span className="attachment-name">📎 {file.name}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.id !== file.id))}><X size={13} /></button></span>)}{preparing.length > 0 && <span className="attachment-status" role="status"><span className="attachment-name">Preparing {preparing.flatMap((entry) => entry.names).length === 1 ? preparing[0].names[0] : `${preparing.flatMap((entry) => entry.names).length} files`}…</span></span>}</div>}
               <button type="button" className="attach" aria-label="Attach file or screenshot" onClick={() => fileInputRef.current?.click()}><Paperclip size={20} /></button>
               <input ref={fileInputRef} className="file-input" type="file" multiple accept="image/*,application/pdf,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx" onChange={(event) => onFilesSelected(event.target.files)} />
               <textarea ref={composerInputRef} value={composer} onChange={(event) => setComposer(event.target.value)} onFocus={scrollChatAfterKeyboardSettles} placeholder={chatStatus === 'running' ? 'Queue or steer…' : 'Message Hermes…'} rows={1} />
@@ -1064,7 +1509,7 @@ export function App() {
                     <button type="button" className="queue" aria-label="Queue for after this turn" disabled={!composer.trim() || !canEngageRunning} onClick={() => engageRunning('queue')}>Queue</button>
                     <button type="button" className="steer" aria-label="Steer the current turn" disabled={!composer.trim() || !canEngageRunning} onClick={() => engageRunning('steer')}>Steer</button>
                   </div>
-                : <button className="send" aria-label="Send message" disabled={(!composer.trim() && attachments.length === 0) || !canSendNow}><SendHorizonal size={20} /></button>}
+                : <button className="send" aria-label="Send message" disabled={(!composer.trim() && attachments.length === 0) || !canSendNow || preparing.length > 0}><SendHorizonal size={20} /></button>}
             </form>
           </section>
         )}
@@ -1105,6 +1550,33 @@ export function App() {
             <div className="sheet-actions">
               <button type="button" className="secondary" onClick={() => setNewChatSheetOpen(false)}>Cancel</button>
               <button type="button" className="primary" onClick={startConfiguredChat}>Start chat</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {bobDialog && (
+        <div className="sheet-backdrop" role="presentation">
+          <section className="new-chat-sheet" role="dialog" aria-modal="true" aria-labelledby="bob-dialog-title">
+            <div className="sheet-handle" aria-hidden="true" />
+            <div className="sheet-header">
+              <div>
+                <div className="eyebrow">Voice shortcut</div>
+                <h2 id="bob-dialog-title">Talk to Bob</h2>
+              </div>
+              <button type="button" className="icon-btn" aria-label="Close dialog" onClick={() => setBobDialog(null)}><X size={18} /></button>
+            </div>
+            {bobDialog.kind === 'setup' && <p className="sheet-copy">Talk to Bob opens one pinned conversation in the default profile and lets you speak to it. Open your main Bob chat, then tap <strong>Set as Bob main</strong> at the top of that chat. Nothing is guessed from titles, and no separate voice chat is created.</p>}
+            {bobDialog.kind === 'stale' && <p className="sheet-copy">Your pinned Bob chat is no longer available on this host in the default profile. Clear the pin, or choose another chat and set it as Bob main.</p>}
+            {bobDialog.kind === 'manage' && <p className="sheet-copy">Bob main is pinned to <strong>{bobRef?.title || 'an untitled chat'}</strong> in the default profile. Clear it, or choose another chat and set it as Bob main.</p>}
+            {bobDialog.kind === 'error' && <p className="sheet-copy">{bobDialog.message} Your pin was kept.</p>}
+            <div className="sheet-actions">
+              {bobDialog.kind === 'setup' && <button type="button" className="secondary" onClick={() => setBobDialog(null)}>Cancel</button>}
+              {(bobDialog.kind === 'stale' || bobDialog.kind === 'manage') && <button type="button" className="secondary" onClick={clearBobMain}>Clear Bob main</button>}
+              {bobDialog.kind === 'error' && <button type="button" className="secondary" onClick={() => { setBobDialog(null); void talkToBob(); }}>Try again</button>}
+              {bobDialog.kind === 'error'
+                ? <button type="button" className="primary" onClick={() => setBobDialog(null)}>Close</button>
+                : <button type="button" className="primary" onClick={() => void chooseBobChat()}>{bobDialog.kind === 'setup' ? 'Choose a chat' : 'Choose another chat'}</button>}
             </div>
           </section>
         </div>

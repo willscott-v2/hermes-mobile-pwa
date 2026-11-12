@@ -10,11 +10,16 @@ const CONTINUE_KEY = 'hermes-mobile-pwa.continue.v2';
 // The active profile is a host-scoped app preference, kept separate from the
 // per-scope continue reference (which is profile-scoped).
 const ACTIVE_PROFILE_KEY = 'hermes-mobile-pwa.active-profile.v1';
+// The explicitly pinned "Bob main" session. One map entry per host/base path, always for the
+// `default` profile; it holds a session id + optional title and nothing else.
+const BOB_MAIN_KEY = 'hermes-mobile-pwa.bob-main.v1';
+const BOB_MAIN_PROFILE = 'default';
 const SCHEMA_KEY = 'hermes-mobile-pwa.schema-version';
 const LEGACY_KEYS = ['hermes-mobile-pwa.sessions-cache.v1', 'hermes-mobile-pwa.last-session-id'];
 
 export interface StorageScope { origin: string; basePath: string; profile?: string }
 export interface ContinueReference { sessionId: string; title?: string; savedAt: string }
+export interface BobMainReference { sessionId: string; title?: string; savedAt: string }
 
 export interface LoginHint {
   username?: string;
@@ -187,6 +192,60 @@ export function clearActiveProfile(): void {
   window.localStorage.removeItem(ACTIVE_PROFILE_KEY);
 }
 
+function bobMainEntryKey(scope: StorageScope): string | null {
+  if (scope.profile !== BOB_MAIN_PROFILE) return null; // exact match: never cross profiles
+  if (!scope.origin.startsWith('http://') && !scope.origin.startsWith('https://')) return null;
+  return `${scope.origin}${scope.basePath ?? ''}`;
+}
+
+function readBobMainEntries(): Record<string, BobMainReference> {
+  const raw = window.localStorage.getItem(BOB_MAIN_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as { v?: unknown; entries?: unknown };
+    if (parsed?.v !== STORAGE_SCHEMA_VERSION || !parsed.entries || typeof parsed.entries !== 'object') return {};
+    return parsed.entries as Record<string, BobMainReference>;
+  } catch {
+    window.localStorage.removeItem(BOB_MAIN_KEY);
+    return {};
+  }
+}
+
+function writeBobMainEntries(entries: Record<string, BobMainReference>): void {
+  if (Object.keys(entries).length === 0) {
+    window.localStorage.removeItem(BOB_MAIN_KEY);
+    return;
+  }
+  window.localStorage.setItem(BOB_MAIN_KEY, JSON.stringify({ v: STORAGE_SCHEMA_VERSION, entries }));
+}
+
+export function saveBobMainReference(scope: StorageScope, ref: { sessionId: string; title?: string }): boolean {
+  const key = bobMainEntryKey(scope);
+  const sessionId = ref.sessionId?.trim();
+  if (!key || !sessionId || sessionId.startsWith('new-')) return false;
+  const title = ref.title?.trim();
+  writeBobMainEntries({
+    ...readBobMainEntries(),
+    [key]: { sessionId, savedAt: new Date().toISOString(), ...(title ? { title: title.slice(0, 80) } : {}) },
+  });
+  return true;
+}
+
+export function loadBobMainReference(scope: StorageScope): BobMainReference | null {
+  const key = bobMainEntryKey(scope);
+  if (!key) return null;
+  const entry = readBobMainEntries()[key];
+  if (!entry || typeof entry.sessionId !== 'string' || !entry.sessionId) return null;
+  return { sessionId: entry.sessionId, title: typeof entry.title === 'string' ? entry.title : undefined, savedAt: String(entry.savedAt ?? '') };
+}
+
+export function clearBobMainReference(scope: StorageScope): void {
+  const key = bobMainEntryKey(scope);
+  if (!key) return;
+  const { [key]: _removed, ...rest } = readBobMainEntries();
+  writeBobMainEntries(rest);
+}
+
 export function loadSessionCache(): HermesSession[] {
   // Private previews are no longer persisted; continue references are scoped.
   return [];
@@ -199,7 +258,7 @@ export function saveSessionCache(sessions: HermesSession[]): void {
 }
 
 export function forgetThisDevice(): string[] {
-  const keys = [CONTINUE_KEY, ACTIVE_PROFILE_KEY, SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS];
+  const keys = [CONTINUE_KEY, ACTIVE_PROFILE_KEY, BOB_MAIN_KEY, SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS];
   const removed: string[] = [];
   for (const key of keys) {
     if (window.localStorage.getItem(key) !== null) {

@@ -210,3 +210,15 @@ test('forget this device clears only app keys', async ({ page }) => {
   );
   expect(other).toBe('keep');
 });
+
+test('a dropped socket reconnects once and resumes the same session', async ({ page }) => {
+  await enableMock(page);
+  await page.getByText('Weekend reading').click();
+  await expect(page.locator('.status-pill')).toHaveText('Ready');
+  await page.getByPlaceholder('Message Hermes…').fill('draft that must survive');
+  await page.evaluate(() => (window as unknown as { __mockDropGateway: () => void }).__mockDropGateway());
+  await expect(page.locator('.status-pill')).toHaveText('Ready', { timeout: 10_000 });
+  await expect(page.getByRole('heading', { name: 'Weekend reading' })).toBeVisible();
+  await expect(page.getByPlaceholder('Message Hermes…')).toHaveValue('draft that must survive');
+  await expect(page.locator('.message-row.user')).toHaveCount(1);
+});

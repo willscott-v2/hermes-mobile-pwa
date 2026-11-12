@@ -263,3 +263,84 @@ describe('active profile preference (host-scoped, minimal)', () => {
     expect(raw).not.toContain('Jean');
      });
 });
+
+describe('Bob main reference (pinned default-profile session)', () => {
+  const scopeFor = (url: string, profile: string | undefined = 'default') => ({ ...(() => {
+    const parsed = new URL(url);
+    return { origin: parsed.origin, basePath: parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/, '') : '' };
+  })(), profile });
+
+  it('round-trips a pinned session id and optional title for the same host, base path and default profile', async () => {
+    const storage = await loadStorage();
+    const scope = scopeFor('https://host:9119/hermes');
+    expect(storage.saveBobMainReference(scope, { sessionId: 'sess-bob', title: 'Bob' })).toBe(true);
+    expect(storage.loadBobMainReference(scope)).toEqual({ sessionId: 'sess-bob', title: 'Bob', savedAt: expect.any(String) });
+  });
+
+  it('is scoped by origin and base path: other hosts read nothing and keep their own pin', async () => {
+    const storage = await loadStorage();
+    storage.saveBobMainReference(scopeFor('https://host:9119/hermes'), { sessionId: 'a' });
+    storage.saveBobMainReference(scopeFor('https://other:9119'), { sessionId: 'b' });
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119/hermes'))?.sessionId).toBe('a');
+    expect(storage.loadBobMainReference(scopeFor('https://other:9119'))?.sessionId).toBe('b');
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119/other'))).toBeNull();
+    expect(storage.loadBobMainReference(scopeFor('https://third:9119'))).toBeNull();
+  });
+
+  it('never crosses profiles: a non-default scope can neither save nor load the pin', async () => {
+    const storage = await loadStorage();
+    const base = scopeFor('https://host:9119');
+    expect(storage.saveBobMainReference({ ...base, profile: 'sales-test' }, { sessionId: 'x' })).toBe(false);
+    expect(storage.saveBobMainReference({ ...base, profile: undefined }, { sessionId: 'x' })).toBe(false);
+    storage.saveBobMainReference(base, { sessionId: 'sess-bob' });
+    expect(storage.loadBobMainReference({ ...base, profile: 'sales-test' })).toBeNull();
+    expect(storage.loadBobMainReference({ ...base, profile: undefined })).toBeNull();
+  });
+
+  it('refuses blank ids and new- placeholders without writing', async () => {
+    const storage = await loadStorage();
+    const scope = scopeFor('https://host:9119');
+    expect(storage.saveBobMainReference(scope, { sessionId: '  ' })).toBe(false);
+    expect(storage.saveBobMainReference(scope, { sessionId: 'new-123' })).toBe(false);
+    expect(storage.saveBobMainReference({ origin: 'ftp://host', basePath: '', profile: 'default' }, { sessionId: 'x' })).toBe(false);
+    expect(storage.appStorageKeys().filter((key) => key.includes('bob-main'))).toEqual([]);
+  });
+
+  it('stores only id, capped title and timestamp: no previews, messages or credentials', async () => {
+    const storage = await loadStorage();
+    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'sess-bob', title: 'x'.repeat(100), ...({ preview: 'secret preview', messages: ['hi'] } as object) } as never);
+    const key = storage.appStorageKeys().find((candidate) => candidate.includes('bob-main'))!;
+    const raw = store.getItem(key)!;
+    expect(raw).not.toContain('preview');
+    expect(raw).not.toContain('messages');
+    expect(raw).not.toContain('token');
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))?.title).toHaveLength(80);
+  });
+
+  it('clear removes only the given scope', async () => {
+    const storage = await loadStorage();
+    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'a' });
+    storage.saveBobMainReference(scopeFor('https://other:9119'), { sessionId: 'b' });
+    storage.clearBobMainReference(scopeFor('https://host:9119'));
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.loadBobMainReference(scopeFor('https://other:9119'))?.sessionId).toBe('b');
+  });
+
+  it('survives corrupt or wrong-version data by reading nothing', async () => {
+    const storage = await loadStorage();
+    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'a' });
+    const key = storage.appStorageKeys().find((candidate) => candidate.includes('bob-main'))!;
+    store.setItem(key, '{not json');
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+    store.setItem(key, JSON.stringify({ v: 1, entries: {} }));
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+  });
+
+  it('is removed by forgetThisDevice', async () => {
+    const storage = await loadStorage();
+    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'a' });
+    storage.forgetThisDevice();
+    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.appStorageKeys()).toEqual([]);
+  });
+});

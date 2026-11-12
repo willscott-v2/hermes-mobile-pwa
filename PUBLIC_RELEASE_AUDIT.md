@@ -73,3 +73,9 @@ git add .
 git commit -m "feat: initial public release"
 gh repo create willscott-v2/hermes-mobile-pwa --public --source=. --remote=origin --push
 ```
+
+## Update log
+
+- **2026-11-12 — Live voice + composer attachments sync.** Published from a sanitized export of the local `HEAD` tree (`20e2a2f`), not from local history: `git archive HEAD` over a fresh clone of the public repo, then placeholders substituted for the private Tailnet hostname (`<tailnet-host>`), local home path (`<home>`), session ids (`<session-id>`) in the new voice docs; `scan:secrets` clean on the export; `tsc` and 465 unit tests green on the export. Untracked `docs/plans/` and `docs/research/` additions stay local.
+
+- **2026-10-06 — Release 1 sync (public commit `0b1ebb0`).** Published from a sanitized export of the live tree, not from local history. Private Tailnet hostname and local home paths replaced with placeholders in the research corpus; live screenshots showing the URL excluded; `scripts/daily-functional-check.mjs` now reads its URL from `HERMES_MOBILE_CHECK_URL` or the gitignored `.hermes/mobile-check-url.txt`. The Aug-04 public-only onboarding-diagnostics prototype was superseded and removed; CONTRIBUTING, issue templates and screenshots retained. Gates in the export: secret scan OK, typecheck, 130 unit, build, smoke, 39 E2E.

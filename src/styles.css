@@ -131,7 +131,9 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 }
 .status-pill.ok, .status-pill.tone-ok { color: #9ff0bf; } .status-pill.bad, .status-pill.tone-bad { color: #ffb7ac; }
 .status-pill.tone-busy { color: #ffd166; } .status-pill.tone-attention { color: #ffb000; border-color: rgba(255,176,0,.45); background: rgba(255,176,0,.12); }
-.sessions-screen { min-height: 0; display: grid; grid-template-rows: repeat(5, auto) minmax(0, 1fr); gap: 12px; overflow: hidden; }
+.sessions-screen { min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.sessions-screen > * { flex: 0 0 auto; }
+.sessions-screen > .session-list { flex: 1 1 0; }
 .profile-switcher { padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 18px; background: rgba(255,255,255,.045); }
 .profile-switcher .select-field { gap: 5px; }
 .profile-switcher .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
@@ -147,7 +149,7 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 .runtime-controls .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .runtime-controls .select-field:last-child .select-options { top: auto; bottom: calc(100% + 6px); }
 .new-chat { display: flex; align-items: center; justify-content: center; gap: 8px; }
-.session-list { min-height: 0; display: grid; gap: 10px; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(env(safe-area-inset-bottom) + 16px); }
+.session-list { min-height: 0; display: grid; align-content: start; gap: 10px; overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(env(safe-area-inset-bottom) + 16px); }
 .load-more { background: rgba(255,255,255,.08); color: #f7f7f2; border: 1px solid rgba(255,255,255,.10); }
 .load-more:disabled { opacity: .55; cursor: wait; }
 .session-row {
@@ -159,7 +161,9 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 .session-copy strong, .session-copy span, .session-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-copy span, .session-copy small, time { color: #9a9a92; font-size: 12px; }
 .session-copy small { color: #74756e; }
-.chat-screen { min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 8px; }
+.chat-screen { min-height: 0; height: 100%; display: flex; flex-direction: column; gap: 8px; }
+.chat-screen > * { flex: 0 0 auto; }
+.chat-screen > .messages { flex: 1 1 0; }
 .refresh-chat { justify-self: center; min-height: 44px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.06); color: #b7b8b1; border-radius: 999px; padding: 10px 14px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
 .messages { min-height: 0; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 16px; scroll-padding-bottom: calc(var(--composer-height) + 16px); }
 .empty-chat { margin: auto; display: grid; place-items: center; gap: 8px; color: #a9aaa3; text-align: center; }
@@ -222,13 +226,14 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
   grid-template-columns: 48px 1fr 48px;
   gap: 10px;
   align-items: end;
-  align-self: end;
+  align-self: stretch;
   z-index: 6;
   padding: 6px 0 calc(var(--composer-safe-area-bottom, env(safe-area-inset-bottom)) + var(--composer-bottom-buffer));
   background: linear-gradient(180deg, transparent, rgba(5,6,7,.96) 28%);
 }
 .attachment-tray { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
 .attachment-chip { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0; padding: 7px 8px 7px 10px; border-radius: 999px; background: rgba(255,255,255,.08); color: #d9d9ce; font-size: 12px; }
+.attachment-status { display: inline-flex; align-items: center; max-width: 100%; min-width: 0; padding: 7px 10px; border-radius: 999px; background: rgba(255,255,255,.05); color: #b9b9ad; font-size: 12px; }
 .attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-chip button { border: 0; background: rgba(255,255,255,.10); color: #f7f7f2; border-radius: 999px; width: 32px; height: 32px; min-width: 32px; display: grid; place-items: center; padding: 0; }
 .file-input { display: none; }
@@ -294,3 +299,31 @@ input:focus, select:focus, textarea:focus { border-color: rgba(255,176,0,.68); b
 .running-actions .steer { background: rgba(255,176,0,.16); border-color: rgba(255,176,0,.4); color: #ffd166; }
 .running-actions button:disabled { opacity: .5; }
 .composer.running { grid-template-columns: 48px minmax(0, 1fr) auto; }
+.link-btn { background: none; border: 0; color: #ffd166; text-decoration: underline; padding: 0 2px; min-height: 0; font: inherit; }
+
+/* Voice mode: a panel in the chat flow (never an overlay) between the transcript and the composer. */
+.voice-toggle, .bob-pin { min-height: 44px; border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.06); color: #b7b8b1; border-radius: 999px; padding: 10px 14px; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.voice-toggle.on, .bob-pin.on { color: #111; background: #ffb000; border-color: #ffb000; font-weight: 750; }
+.voice-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 20px; border: 1px solid rgba(255,176,0,.32); background: rgba(255,176,0,.08); }
+.voice-copy { min-width: 0; display: grid; gap: 3px; }
+.voice-status { font-size: 13px; font-weight: 750; color: #ffd166; overflow-wrap: anywhere; }
+.voice-caption { font-size: 14px; line-height: 1.3; color: #f7f7f2; overflow-wrap: anywhere; max-height: 3.9em; overflow: hidden; }
+.voice-hint { font-size: 12px; line-height: 1.3; color: #b7b8b1; overflow-wrap: anywhere; }
+.voice-error { font-size: 13px; line-height: 1.3; color: #ffd0ca; overflow-wrap: anywhere; }
+.voice-main { min-height: 48px; min-width: 48px; border: 0; border-radius: 999px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; font-size: 14px; background: #ffb000; color: #111; }
+.voice-main.stop, .voice-main.interrupt, .voice-main.cancel { background: rgba(255,255,255,.10); color: #f7f7f2; border: 1px solid rgba(255,255,255,.20); }
+.voice-main.stop { background: #ff6b5e; color: #1a0705; border-color: #ff6b5e; }
+.voice-main:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 360px) {
+  .voice-panel { grid-template-columns: 1fr; }
+}
+
+/* Talk to Bob: the prominent shortcut on Conversations. */
+.bob-shortcut { display: flex; gap: 8px; align-items: stretch; }
+.bob-talk { flex: 1 1 auto; min-width: 0; min-height: 64px; display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 14px; border-radius: 22px; border: 1px solid rgba(255,176,0,.55); background: linear-gradient(145deg, rgba(255,176,0,.28), rgba(255,176,0,.10)); color: #f7f7f2; }
+.bob-talk:disabled { opacity: .7; cursor: wait; }
+.bob-talk-icon { flex: 0 0 auto; width: 42px; height: 42px; border-radius: 16px; display: grid; place-items: center; background: #ffb000; color: #111; }
+.bob-talk-copy { min-width: 0; display: grid; gap: 2px; }
+.bob-talk-copy strong { font-size: 17px; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bob-talk-copy small { color: #e2cf97; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bob-settings { flex: 0 0 auto; height: auto; min-height: 64px; width: 48px; border-radius: 22px; }

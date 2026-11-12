@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resumeResultFromPayload, shouldDeclineOnPhone, clarifyServerRequestResult, approvalActionAvailability, approvalResponseParams, attentionFromEvent, clarifyResponseParams, pendingAttentionEvents, queueOutcomeFromResult, queuePromptParams, steerOutcomeFromError, steerOutcomeFromResult, steerParams, updateAttentionFromEvent, normalizeServerUrl, endpointUrl, eventToMessages, HermesApiClient, normalizeHistoryMessages, redactForLog, wsUrl } from './hermesApi';
+import { attachmentRequest, attachmentResultFromResponse, classifyAttachment, PreparedAttachment, resumeResultFromPayload, shouldDeclineOnPhone, clarifyServerRequestResult, approvalActionAvailability, approvalResponseParams, attentionFromEvent, clarifyResponseParams, pendingAttentionEvents, queueOutcomeFromResult, queuePromptParams, steerOutcomeFromError, steerOutcomeFromResult, steerParams, updateAttentionFromEvent, normalizeServerUrl, endpointUrl, eventToMessages, HermesApiClient, normalizeHistoryMessages, redactForLog, wsUrl, submitPromptParams, interruptOutcomeFromResult } from './hermesApi';
 import { JsonRpcError } from './jsonRpc';
 
  describe('normalizeServerUrl', () => {
@@ -686,5 +686,309 @@ describe('clarifyServerRequestResult', () => {
   it('a current-protocol clarify without a qid is declined on the phone', () => {
     expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's', title: 't', detail: 'd', choices: ['A'] })).toBe(true);
     expect(shouldDeclineOnPhone({ kind: 'clarify', serverRequestId: 's', questionId: 'q0', title: 't', detail: 'd', choices: ['A'] })).toBe(false);
+  });
+});
+
+describe('audio socket URLs and auth', () => {
+  it('builds wss audio URLs that carry the profile and keep the proxy path prefix', async () => {
+    const { audioWsUrl } = await import('./hermesApi');
+    expect(audioWsUrl('https://agent.example/hermes', 'transcribe-stream', { profile: 'default', ticket: 'abc123' }))
+      .toBe('wss://agent.example/hermes/api/audio/transcribe-stream?profile=default&ticket=abc123');
+    expect(audioWsUrl('http://127.0.0.1:9119', 'speak-stream', { profile: 'sales-test', token: 'tok' }))
+      .toBe('ws://127.0.0.1:9119/api/audio/speak-stream?profile=sales-test&token=tok');
+  });
+
+  it('refuses to build an audio URL without an explicit profile', async () => {
+    const { audioWsUrl } = await import('./hermesApi');
+    expect(() => audioWsUrl('https://agent.example', 'speak-stream', { profile: '  ', ticket: 'x' })).toThrow(/profile/i);
+  });
+
+  it('token mode passes the session token in the query and never mints a ticket', async () => {
+    const { vi } = await import('vitest');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const url = await new HermesApiClient('https://agent.example').audioSocketUrl('speak-stream', { mode: 'token', token: 'session-token-1' }, 'default');
+      expect(url).toBe('wss://agent.example/api/audio/speak-stream?profile=default&token=session-token-1');
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('password/cookie mode mints a fresh one-use ticket per socket', async () => {
+    const { vi } = await import('vitest');
+    let counter = 0;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ticket: `ticket-${++counter}` }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const client = new HermesApiClient('https://agent.example/hermes');
+      const first = await client.audioSocketUrl('transcribe-stream', { mode: 'password' }, 'default');
+      const second = await client.audioSocketUrl('speak-stream', { mode: 'password' }, 'default');
+      expect(first).toBe('wss://agent.example/hermes/api/audio/transcribe-stream?profile=default&ticket=ticket-1');
+      expect(second).toBe('wss://agent.example/hermes/api/audio/speak-stream?profile=default&ticket=ticket-2');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a token-mode session without a token is an error, not an anonymous socket', async () => {
+    await expect(new HermesApiClient('https://agent.example').audioSocketUrl('speak-stream', { mode: 'token' }, 'default')).rejects.toThrow(/token/i);
+  });
+});
+
+describe('batch transcription (POST /api/audio/transcribe)', () => {
+  async function withFetch<T>(response: () => Response | Promise<Response>, run: (fetchMock: ReturnType<typeof import('vitest').vi.fn>) => Promise<T>): Promise<T> {
+    const { vi } = await import('vitest');
+    const fetchMock = vi.fn(async (_url: unknown, _init?: unknown) => response());
+    vi.stubGlobal('fetch', fetchMock);
+    try { return await run(fetchMock); } finally { vi.unstubAllGlobals(); }
+  }
+  const ok = () => new Response(JSON.stringify({ ok: true, transcript: '  hello there  ', provider: 'local' }), { status: 200 });
+  const audio = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 1, 2, 255]);
+  const base64 = 'UklGRgABAv8=';
+
+  it('posts profile-scoped JSON {data_url, mime_type} with a base64 WAV and returns the transcript', async () => {
+    await withFetch(ok, async (fetchMock) => {
+      const text = await new HermesApiClient('https://agent.example/hermes').transcribeAudio({ mode: 'password' }, 'sales-test', audio);
+      expect(text).toBe('hello there');
+      const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+      expect(String(url)).toBe('https://agent.example/hermes/api/audio/transcribe?profile=sales-test');
+      expect(init.method).toBe('POST');
+      expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+      expect(JSON.parse(String(init.body))).toEqual({ data_url: `data:audio/wav;base64,${base64}`, mime_type: 'audio/wav' });
+    });
+  });
+
+  it('always sends the exact profile, including default', async () => {
+    await withFetch(ok, async (fetchMock) => {
+      await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio);
+      expect(String((fetchMock.mock.calls[0] as [URL])[0])).toBe('https://agent.example/api/audio/transcribe?profile=default');
+    });
+  });
+
+  it('refuses a blank profile before any request', async () => {
+    await withFetch(ok, async (fetchMock) => {
+      await expect(new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, '  ', audio)).rejects.toThrow(/profile/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it('password mode relies on the session cookie: credentials include and no Authorization header', async () => {
+    await withFetch(ok, async (fetchMock) => {
+      await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio);
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(init.credentials).toBe('include');
+      expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    });
+  });
+
+  it('token mode sends a Bearer header and the token never appears in the URL or body', async () => {
+    await withFetch(ok, async (fetchMock) => {
+      await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'token', token: 'SECRETTOKEN' }, 'default', audio);
+      const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+      expect((init.headers as Record<string, string>).Authorization).toBe('Bearer SECRETTOKEN');
+      expect(String(url)).not.toContain('SECRETTOKEN');
+      expect(String(init.body)).not.toContain('SECRETTOKEN');
+    });
+  });
+
+  it('passes the abort signal to fetch and propagates the abort', async () => {
+    const controller = new AbortController();
+    await withFetch(() => new Promise<Response>(() => undefined), async (fetchMock) => {
+      const pending = new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio, controller.signal);
+      expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
+      void pending.catch(() => undefined);
+    });
+    const { vi } = await import('vitest');
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => new Promise<Response>((_, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    try {
+      const pending = new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio, controller.signal);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a blank or missing transcript is an empty string, not an error', async () => {
+    await withFetch(() => new Response(JSON.stringify({ ok: true, transcript: '', provider: 'local' }), { status: 200 }), async () => {
+      expect(await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio)).toBe('');
+    });
+    await withFetch(() => new Response(JSON.stringify({ ok: true }), { status: 200 }), async () => {
+      expect(await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio)).toBe('');
+    });
+  });
+
+  it('turns HTTP failures into HttpError with the server detail', async () => {
+    await withFetch(() => new Response(JSON.stringify({ detail: 'Audio recording is too large' }), { status: 413 }), async () => {
+      await expect(new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio)).rejects.toMatchObject({ name: 'HttpError', status: 413, message: 'Audio recording is too large' });
+    });
+    await withFetch(() => new Response('nope', { status: 401 }), async () => {
+      await expect(new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', audio)).rejects.toMatchObject({ name: 'HttpError', status: 401 });
+    });
+  });
+
+  it('never leaks the bearer token through an error message', async () => {
+    await withFetch(() => new Response(JSON.stringify({ detail: 'bad Authorization: Bearer SECRETTOKEN token=SECRETTOKEN' }), { status: 500 }), async () => {
+      const error = await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'token', token: 'SECRETTOKEN' }, 'default', audio).then(() => new Error('resolved'), (reason: unknown) => reason as Error);
+      expect(redactForLog(error.message)).not.toContain('SECRETTOKEN');
+    });
+  });
+
+  it('base64-encodes a large recording without blowing the call stack', async () => {
+    await withFetch(ok, async (fetchMock) => {
+      const big = new Uint8Array(3_000_000).fill(7);
+      await new HermesApiClient('https://agent.example').transcribeAudio({ mode: 'password' }, 'default', big);
+      const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)) as { data_url: string };
+      const decoded = atob(body.data_url.split(',', 2)[1]);
+      expect(decoded.length).toBe(3_000_000);
+      expect(decoded.charCodeAt(2_999_999)).toBe(7);
+    });
+  });
+});
+
+describe('attachment RPC requests', () => {
+  const item = (name: string, mimeType: string, dataUrl = 'data:x;base64,AAAA'): PreparedAttachment => Object.freeze({ id: 'p1', name, mimeType, size: 3, dataUrl });
+
+  it('classifies images, PDFs (by type or extension) and everything else', () => {
+    expect(classifyAttachment('a.png', 'image/png')).toBe('image');
+    expect(classifyAttachment('a.heic', 'image/heic')).toBe('image');
+    expect(classifyAttachment('a.pdf', 'application/pdf')).toBe('pdf');
+    expect(classifyAttachment('Scan.PDF', '')).toBe('pdf');
+    expect(classifyAttachment('notes.txt', 'text/plain')).toBe('file');
+    expect(classifyAttachment('blob', '')).toBe('file');
+  });
+
+  it('sends images with image.attach_bytes carrying the captured data URL untouched', () => {
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(attachmentRequest('live-1', item('IMG 1.png', 'image/png', dataUrl))).toEqual({
+      kind: 'image',
+      method: 'image.attach_bytes',
+      params: { session_id: 'live-1', filename: 'IMG 1.png', name: 'IMG 1.png', content_base64: dataUrl },
+    });
+  });
+
+  it('sends PDFs with pdf.attach', () => {
+    expect(attachmentRequest('live-1', item('doc.pdf', 'application/pdf', 'data:application/pdf;base64,JVBERg=='))).toEqual({
+      kind: 'pdf',
+      method: 'pdf.attach',
+      params: { session_id: 'live-1', filename: 'doc.pdf', name: 'doc.pdf', content_base64: 'data:application/pdf;base64,JVBERg==' },
+    });
+  });
+
+  it('sends other files with file.attach using name, path and data_url', () => {
+    expect(attachmentRequest('live-1', item('notes.txt', 'text/plain', 'data:text/plain;base64,aGk='))).toEqual({
+      kind: 'file',
+      method: 'file.attach',
+      params: { session_id: 'live-1', name: 'notes.txt', path: 'notes.txt', data_url: 'data:text/plain;base64,aGk=' },
+    });
+  });
+
+  it('builds results from the gateway response with the same defaults as before', () => {
+    expect(attachmentResultFromResponse('image', 'a.png', {})).toEqual({ name: 'a.png', kind: 'image', text: '[User attached image: a.png]' });
+    expect(attachmentResultFromResponse('image', 'a.png', { text: '[img]' }).text).toBe('[img]');
+    expect(attachmentResultFromResponse('pdf', 'a.pdf', {})).toEqual({ name: 'a.pdf', kind: 'pdf', text: '[User attached PDF: a.pdf]' });
+    expect(attachmentResultFromResponse('file', 'n.txt', {}).text).toBe('[User attached file: n.txt]');
+    expect(attachmentResultFromResponse('file', 'n.txt', { ref_text: '@file:n.txt' }).text).toBe('[User attached file: n.txt]\n@file:n.txt');
+    expect(attachmentResultFromResponse('file', 'n.txt', { text: '@file:n.txt' }).text).toBe('[User attached file: n.txt]\n@file:n.txt');
+  });
+});
+
+// ---- Live voice (GPT-Live) REST seams: appended for the live-voice candidate ----
+describe('voice-live status and session', () => {
+  type Seen = { url: string; init?: RequestInit };
+  function withFetch(handler: (seen: Seen) => Response | Promise<Response>) {
+    const seen: Seen[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const call = { url: String(input), init };
+      seen.push(call);
+      return handler(call);
+    }) as unknown as typeof fetch;
+    return { seen, restore: () => { globalThis.fetch = originalFetch; } };
+  }
+  const client = () => new HermesApiClient('https://agent.example/hermes');
+
+  it('status is profile-scoped, non-throwing on a missing route, and normalizes the shape', async () => {
+    const { seen, restore } = withFetch(() => new Response(JSON.stringify({ ok: true, mode: 'gpt-live', available: true, reason: null, model: 'gpt-live-1', voice: 'marin' }), { status: 200 }));
+    try {
+      const status = await client().voiceLiveStatus({ mode: 'token', token: 'tok-1' }, 'default');
+      expect(seen[0].url).toBe('https://agent.example/hermes/api/audio/voice-live/status?profile=default');
+      expect((seen[0].init?.headers as Record<string, string>).Authorization).toBe('Bearer tok-1');
+      expect(status).toEqual({ mode: 'gpt-live', available: true, reason: null, model: 'gpt-live-1', voice: 'marin' });
+    } finally { restore(); }
+  });
+
+  it('status 404/500 (older gateway) resolves to chained/unavailable instead of throwing', async () => {
+    const { restore } = withFetch(() => new Response('Not Found', { status: 404 }));
+    try {
+      const status = await client().voiceLiveStatus({ mode: 'password' }, 'default');
+      expect(status.available).toBe(false);
+      expect(status.mode).toBe('chained');
+    } finally { restore(); }
+  });
+
+  it('status 401 is rethrown so the app can re-authenticate', async () => {
+    const { restore } = withFetch(() => new Response(JSON.stringify({ detail: 'expired' }), { status: 401 }));
+    try {
+      await expect(client().voiceLiveStatus({ mode: 'password' }, 'default')).rejects.toMatchObject({ status: 401 });
+    } finally { restore(); }
+  });
+
+  it('session POSTs the SDP byte-exact as JSON with the profile in the query and auth only in the header', async () => {
+    const sdp = 'v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\n';
+    const { seen, restore } = withFetch(() => new Response(JSON.stringify({ ok: true, session: { id: 'live-9' }, transport: { type: 'webrtc', sdp: 'v=0\r\nanswer\r\n' } }), { status: 200 }));
+    try {
+      const answer = await client().voiceLiveSession({ mode: 'token', token: 'tok-2' }, 'default', sdp, [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }]);
+      expect(seen[0].url).toBe('https://agent.example/hermes/api/audio/voice-live/session?profile=default');
+      expect(seen[0].init?.method).toBe('POST');
+      expect(seen[0].init?.credentials).toBe('include');
+      const body = JSON.parse(String(seen[0].init?.body));
+      expect(body.sdp).toBe(sdp);
+      expect(body.history).toHaveLength(1);
+      expect(String(seen[0].init?.body)).not.toContain('tok-2');
+      expect(answer).toEqual({ sessionId: 'live-9', sdp: 'v=0\r\nanswer\r\n' });
+    } finally { restore(); }
+  });
+
+  it('session 503 (not configured) and 502 (vendor) surface as HttpError with the status', async () => {
+    for (const status of [503, 502]) {
+      const { restore } = withFetch(() => new Response(JSON.stringify({ detail: `fail ${status}` }), { status }));
+      try {
+        await expect(client().voiceLiveSession({ mode: 'password' }, 'default', 'v=0\r\n')).rejects.toMatchObject({ status, message: `fail ${status}` });
+      } finally { restore(); }
+    }
+  });
+
+  it('session refuses a blank offer or profile before touching the network', async () => {
+    const { seen, restore } = withFetch(() => new Response('{}', { status: 200 }));
+    try {
+      await expect(client().voiceLiveSession({ mode: 'password' }, 'default', '  ')).rejects.toThrow(/SDP offer/);
+      await expect(client().voiceLiveSession({ mode: 'password' }, ' ', 'v=0')).rejects.toThrow(/profile/);
+      expect(seen).toHaveLength(0);
+    } finally { restore(); }
+  });
+});
+
+describe('voice-live prompt params', () => {
+  it('submitPromptParams tags a delegated turn with surface + bounded voice_context', () => {
+    expect(submitPromptParams('s1', 'what is on my plate')).toEqual({ session_id: 's1', text: 'what is on my plate' });
+    const params = submitPromptParams('s1', 'yes', { surface: 'voice-live', voiceContext: 'x'.repeat(7000) });
+    expect(params.surface).toBe('voice-live');
+    expect(String(params.voice_context)).toHaveLength(6000);
+  });
+
+  it('voice_context is never sent without the voice-live surface', () => {
+    expect(submitPromptParams('s1', 'hi', { voiceContext: 'User: hi' })).toEqual({ session_id: 's1', text: 'hi' });
+  });
+
+  it('interruptOutcomeFromResult maps the gateway statuses', () => {
+    expect(interruptOutcomeFromResult({ status: 'interrupted' })).toEqual({ status: 'interrupted' });
+    expect(interruptOutcomeFromResult({ status: 'not_interrupted' })).toEqual({ status: 'not_interrupted' });
+    expect(interruptOutcomeFromResult({ status: 'weird' })).toEqual({ status: 'unknown', raw: 'weird' });
   });
 });

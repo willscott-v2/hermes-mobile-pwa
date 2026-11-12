@@ -1,4 +1,4 @@
-import { AuthSession, ChatMessage, GatewayCallbacks, GatewayHandle, HermesSession, HistoryPage, ResumeResult, RuntimeOptions, RuntimeSelection, ServerStatus, SessionPage } from './hermesApi';
+import { AuthSession, ChatMessage, classifyAttachment, GatewayCallbacks, GatewayHandle, HermesSession, HistoryPage, HttpError, PreparedAttachment, ResumeResult, RuntimeOptions, RuntimeSelection, ServerStatus, SessionPage } from './hermesApi';
 
 const LONG_HISTORY_TOTAL = 300;
 const LONG_HISTORY_ID = 'mock-long-history';
@@ -25,6 +25,10 @@ const RAW_MOCK_SESSIONS: HermesSession[] = [
    { id: 'sales-campaign', title: 'Launch campaign', preview: 'Sales launch plan under the sales-test profile.', updated_at: new Date(Date.now() - 1000 * 60 * 40).toISOString(), message_count: 3, running: false, source: 'mock', profile: 'sales-test' },
 ];
 
+// The real gateway hands out a live session id distinct from the stored (history) id, and tags every
+// message frame with it at the top level. The mock mirrors both so voice can be proven against them.
+export const mockLiveId = (storedId: string) => `live-${storedId}`;
+
 function normalizeProfileTag(profile?: string): string {
   const value = profile?.trim();
   return value || 'default';
@@ -41,6 +45,31 @@ function filterSessionsByProfile(rows: HermesSession[], profile?: string): Herme
 
 export class MockHermesClient {
   readonly baseUrl = 'mock://hermes';
+  private holdNextDetail = false;
+  private releaseHeldDetail: (() => void) | null = null;
+  private holdNextPage = false;
+  private releaseHeldPage: (() => void) | null = null;
+  private holdNextSubmit = false;
+  private rejectHeldSubmit: ((error: Error) => void) | null = null;
+
+  constructor() {
+    // Test hooks (mock mode only; this class is never constructed against a real host): make the next
+    // `sessionDetail` call wait until released, so tests can interleave navigation with a slow request.
+    if (typeof window === 'undefined') return;
+    const hooks = window as unknown as { __mockHoldNextSessionDetail?: () => void; __mockReleaseSessionDetail?: () => void };
+    hooks.__mockHoldNextSessionDetail = () => { this.holdNextDetail = true; };
+    hooks.__mockReleaseSessionDetail = () => { this.releaseHeldDetail?.(); this.releaseHeldDetail = null; };
+    // Same idea for the session list (a profile switch is "loading" until released) and for
+    // `submitPrompt` (stays unaccepted until the socket drops, like an RPC that never got its reply).
+    const more = window as unknown as {
+      __mockHoldNextSessionPage?: () => void; __mockReleaseSessionPage?: () => void;
+      __mockHoldNextSubmit?: () => void; __mockSubmits?: string[];
+    };
+    more.__mockHoldNextSessionPage = () => { this.holdNextPage = true; };
+    more.__mockReleaseSessionPage = () => { this.releaseHeldPage?.(); this.releaseHeldPage = null; };
+    more.__mockHoldNextSubmit = () => { this.holdNextSubmit = true; };
+    more.__mockSubmits = [];
+  }
   async status(): Promise<ServerStatus> {
     return { version: 'mock-0.1.0', gateway_running: true, auth_required: false, active_sessions: 1, profiles: ['default', 'sales-test'] };
   }
@@ -55,6 +84,10 @@ export class MockHermesClient {
   capability() { return { kind: 'tokenOnly' as const }; }
   async passwordLogin(): Promise<AuthSession> { return { mode: 'password', username: 'mock' }; }
   async sessionPage(_auth?: AuthSession, options: { limit?: number; offset?: number; profile?: string } = {}): Promise<SessionPage> {
+    if (this.holdNextPage) {
+      this.holdNextPage = false;
+      await new Promise<void>((resolve) => { this.releaseHeldPage = resolve; });
+    }
     const limit = options.limit ?? 75;
     const offset = options.offset ?? 0;
     const rows = filterSessionsByProfile(sessions, options.profile);
@@ -64,8 +97,13 @@ export class MockHermesClient {
   async sessionMessages(_auth: AuthSession, session: HermesSession): Promise<ChatMessage[]> { return starterMessages(session); }
   async sessionTranscript(_auth: AuthSession, session: HermesSession): Promise<{ session: HermesSession; messages: ChatMessage[] }> { return { session, messages: starterMessages(session) }; }
   async sessionDetail(_auth: AuthSession, session: HermesSession): Promise<HermesSession> {
-    const found = sessions.find((item) => item.id === session.id);
-    if (!found) throw new Error('Session not found.');
+    if (this.holdNextDetail) {
+      this.holdNextDetail = false;
+      await new Promise<void>((resolve) => { this.releaseHeldDetail = resolve; });
+    }
+    // Exact id AND profile, like the real endpoint: the same id can exist under two profiles.
+    const found = sessions.find((item) => item.id === session.id && (!session.profile || normalizeProfileTag(item.profile) === normalizeProfileTag(session.profile)));
+    if (!found) throw new HttpError('Session not found.', 404);
     return found;
   }
   async resolveLatestSession(_auth: AuthSession, session: HermesSession): Promise<HermesSession> { return session; }
@@ -84,17 +122,25 @@ export class MockHermesClient {
   }
   async connectGateway(_auth: AuthSession, callbacks: GatewayCallbacks): Promise<GatewayHandle> {
     window.setTimeout(() => callbacks.onOpen?.(), 10);
+    // Test hook: `window.__mockDropGateway()` simulates the server closing the socket
+    // (e.g. iOS backgrounded the page and the gateway's ping timed out).
+    (window as unknown as { __mockDropGateway?: () => void }).__mockDropGateway = () => {
+      callbacks.onClose?.();
+      // A real socket close rejects every RPC still waiting for its reply (after onClose has fired).
+      this.rejectHeldSubmit?.(new Error('Gateway connection closed.'));
+      this.rejectHeldSubmit = null;
+    };
     return {
       createSession: async (selection?: RuntimeSelection) => {
         const modelText = [selection?.provider, selection?.model].filter(Boolean).join('/');
         callbacks.onEvent({ type: 'message.interim', text: `Profile: ${selection?.profile || 'default'} · Model: ${modelText || 'inherit'} · Reasoning: ${selection?.reasoning_effort || 'inherit'}` });
         const id = `mock-${Date.now()}`;
-        return { liveId: id, storedId: id };
+        return { liveId: mockLiveId(id), storedId: id };
       },
       resumeSession: async (sessionId: string): Promise<ResumeResult> => {
         callbacks.onEvent({ type: 'session.info', session_id: sessionId, status: 'ready' });
         const openRequestKeys: string[] = [];
-        const result = (running: boolean): ResumeResult => ({ sessionId, storedId: sessionId, running, status: running ? 'streaming' : 'idle', openRequestKeys });
+        const result = (running: boolean): ResumeResult => ({ sessionId: mockLiveId(sessionId), storedId: sessionId, running, status: running ? 'streaming' : 'idle', openRequestKeys });
         if (sessionId === 'mock-lisbon-trip') {
           callbacks.onEvent({
             type: 'clarify.request',
@@ -191,8 +237,8 @@ export class MockHermesClient {
           });
         }
         if (sessionId === RUNNING_BUILD_ID) {
-          callbacks.onEvent({ type: 'message.start' });
-          callbacks.onEvent({ type: 'message.delta', payload: { text: 'Still building the release artifact…' } });
+          callbacks.onEvent({ type: 'message.start', session_id: mockLiveId(sessionId) });
+          callbacks.onEvent({ type: 'message.delta', session_id: mockLiveId(sessionId), payload: { text: 'Still building the release artifact…' } });
           return result(true);
         }
         return result(false);
@@ -207,7 +253,10 @@ export class MockHermesClient {
         callbacks.onEvent({ type: 'status.update', payload: { kind: 'process', text: 'Steer received; applying after the current tool call.' } });
         return { status: 'accepted' as const };
       },
-      attachFile: async (_sessionId: string, file: File) => ({ name: file.name, kind: file.type.startsWith('image/') ? 'image' : file.type === 'application/pdf' ? 'pdf' : 'file', text: `[Mock attached file: ${file.name}]` }),
+      attachFile: async (_sessionId: string, attachment: PreparedAttachment) => {
+        if (!attachment.dataUrl.startsWith('data:')) throw new Error('Mock attachment has no captured bytes.');
+        return { name: attachment.name, kind: classifyAttachment(attachment.name, attachment.mimeType), text: `[Mock attached file: ${attachment.name}]` };
+      },
       respondApproval: async (_sessionId: string, requestId: string) => {
         callbacks.onEvent({ type: 'approval.expire', payload: { request_id: requestId } });
       },
@@ -219,14 +268,19 @@ export class MockHermesClient {
       },
       declineServerRequest: () => {},
       serverRequestMethods: ['approval', 'clarify', 'sudo', 'secret'],
-      submitPrompt: async (_sessionId: string, prompt: string) => {
-        callbacks.onEvent({ type: 'message.start' });
+      submitPrompt: async (sessionId: string, prompt: string) => {
+        (window as unknown as { __mockSubmits?: string[] }).__mockSubmits?.push(prompt);
+        if (this.holdNextSubmit) {
+          this.holdNextSubmit = false;
+          await new Promise<void>((_, reject) => { this.rejectHeldSubmit = reject; });
+        }
+        callbacks.onEvent({ type: 'message.start', session_id: sessionId });
         const chunks = [`I’ll work on: “${prompt}”.\n\n`, 'Mock mode is wired, so no real Hermes server was contacted. ', 'Connect to your dashboard URL to drive a live agent.'];
         for (const chunk of chunks) {
           await new Promise((resolve) => window.setTimeout(resolve, 220));
-          callbacks.onEvent({ type: 'message.delta', payload: { text: chunk } });
+          callbacks.onEvent({ type: 'message.delta', session_id: sessionId, payload: { text: chunk } });
         }
-        callbacks.onEvent({ type: 'message.complete', payload: { text: '', status: 'complete' } });
+        callbacks.onEvent({ type: 'message.complete', session_id: sessionId, payload: { text: '', status: 'complete' } });
       },
       close: () => callbacks.onClose?.(),
     };
