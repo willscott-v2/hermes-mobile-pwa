@@ -65,6 +65,15 @@ export interface SessionPage {
   offset: number;
 }
 
+// One row of `GET /api/sessions/search` results (verified against the installed route).
+interface RawSearchHit extends Omit<HermesSession, 'id'> {
+  id?: string;
+  session_id?: string;
+  snippet?: string;
+  session_started?: string | number | null;
+  lineage_root?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'status';
@@ -420,6 +429,33 @@ export class HermesApiClient {
 
   async sessions(auth: AuthSession, limit = 75): Promise<HermesSession[]> {
     return (await this.sessionPage(auth, { limit, offset: 0 })).sessions;
+  }
+
+  // Profile-scoped server search (`GET /api/sessions/search`): id match, then FTS message
+  // content, then title fill. Unlike the listing it can return hidden rows that match, which
+  // is how a hidden canonical chat becomes reachable from Conversations search without
+  // widening the ordinary list. Result rows carry `session_id` (lineage tip) plus the rich
+  // row fields when available; content-only hits carry just `session_id` + `snippet`.
+  async searchSessions(auth: AuthSession, query: string, options: { profile?: string; limit?: number } = {}): Promise<HermesSession[]> {
+    const q = query.trim();
+    if (!q) return [];
+    const url = endpointUrl(this.baseUrl, '/api/sessions/search');
+    url.searchParams.set('q', q);
+    url.searchParams.set('limit', String(Math.min(Math.max(options.limit ?? 20, 1), 100)));
+    const profile = options.profile?.trim();
+    if (profile) url.searchParams.set('profile', profile);
+    const response = await this.get<{ results?: RawSearchHit[] }>(url, auth);
+    return (response.results ?? []).map((hit) => {
+      const id = String(hit.id ?? hit.session_id ?? '');
+      const session = normalizeSession({
+        ...hit,
+        id,
+        preview: hit.preview || hit.snippet || undefined,
+        last_active: hit.last_active ?? undefined,
+        started_at: hit.started_at ?? hit.session_started ?? undefined,
+      });
+      return session.profile || !profile ? session : { ...session, profile };
+    }).filter((session) => Boolean(session.id));
   }
 
   async sessionMessages(auth: AuthSession, session: HermesSession, limit = 120): Promise<ChatMessage[]> {

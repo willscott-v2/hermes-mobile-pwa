@@ -181,10 +181,10 @@ test('pending attention blocks ordinary send and never reads ready', async ({
 
 test('back restores the session search', async ({ page }) => {
   await enableMock(page);
-  await page.getByPlaceholder('Search loaded sessions').fill('Lisbon');
+  await page.getByPlaceholder('Search conversations').fill('Lisbon');
   await page.getByText('Lisbon trip').click();
   await page.getByRole('button', { name: 'Back to sessions' }).click();
-  await expect(page.getByPlaceholder('Search loaded sessions')).toHaveValue(
+  await expect(page.getByPlaceholder('Search conversations')).toHaveValue(
     'Lisbon',
   );
   await expect(page.locator('.session-row')).toHaveCount(1);

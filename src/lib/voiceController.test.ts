@@ -304,11 +304,11 @@ describe('VoiceController gateway loss', () => {
     controller.start(scope);
     backend.dictations[0].listening();
     controller.stop();
-    backend.dictations[0].final('  hello bob  ');
+    backend.dictations[0].final('  hello there  ');
     expect(phase()).toBe('submitting');
     controller.gatewayLost();
     expect(onSubmitFailed).toHaveBeenCalledTimes(1);
-    expect(onSubmitFailed).toHaveBeenCalledWith('hello bob', expect.any(String));
+    expect(onSubmitFailed).toHaveBeenCalledWith('hello there', expect.any(String));
     expect(phase()).toBe('idle');
     // The late rejection from the dropped socket is ignored: no duplicate restore, no error state.
     reject(new Error('Not sent: gateway closed'));

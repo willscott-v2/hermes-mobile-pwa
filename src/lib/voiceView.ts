@@ -1,6 +1,7 @@
 // Pure presentation model for the voice panel: what to say, what the primary control does, and
 // whether it is enabled. Keeping this out of the component makes labels/disabled rules testable.
 
+import { ASSISTANT_NAME } from './assistantName';
 import type { VoiceCapability } from './voiceBackend';
 import type { VoiceState } from './voiceMachine';
 
@@ -40,10 +41,10 @@ export function voiceView(state: VoiceState, context: VoiceViewContext): VoiceVi
     case 'submitting':
       return { status: 'Sending…', caption: youSaid, hint, error: null, primary: { action: 'interrupt', label: 'Stop voice reply', disabled: false } };
     case 'waiting':
-      if (context.live) return { status: 'Bob is working. Keep talking.', caption: youSaid, hint, error: null, primary: hangUp };
+      if (context.live) return { status: `${ASSISTANT_NAME} is working. Keep talking.`, caption: youSaid, hint, error: null, primary: hangUp };
       return { status: 'Hermes is replying…', caption: youSaid, hint, error: null, primary: { action: 'interrupt', label: 'Stop voice reply', disabled: false } };
     case 'speaking':
-      return { status: context.live ? 'Bob is speaking…' : 'Speaking…', caption: youSaid, hint, error: null, primary: { action: 'interrupt', label: 'Stop speaking', disabled: false } };
+      return { status: context.live ? `${ASSISTANT_NAME} is speaking…` : 'Speaking…', caption: youSaid, hint, error: null, primary: { action: 'interrupt', label: 'Stop speaking', disabled: false } };
     case 'interrupted':
       return { status: 'Stopped. The text reply stays in the chat.', caption: youSaid, hint, error: capabilityError, primary: startable };
     case 'error':

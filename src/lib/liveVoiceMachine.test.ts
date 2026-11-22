@@ -4,7 +4,7 @@ import {
   NO_RESULT_TEXT, NOTHING_RUNNING_TEXT, QUEUED_ACK_TEXT, STOP_SPEECH_NOTE, transition,
 } from './liveVoiceMachine';
 
-const scope: LiveScope = { profile: 'default', sessionId: 'bob-live-1' };
+const scope: LiveScope = { profile: 'default', sessionId: 'main-live-1' };
 
 function run(events: LiveVoiceEvent[], from: LiveVoiceState = initialLiveState()): { state: LiveVoiceState; effects: LiveVoiceEffect[] } {
   let state = from;
@@ -86,7 +86,7 @@ describe('delegation routing', () => {
   it('new work submits to the scope session exactly once and moves to working', () => {
     const result = transition(connected(), delegation('d1', '  what is on my plate  '));
     expect(result.state.phase).toBe('working');
-    expect(result.effects).toEqual([{ type: 'submit', delegationId: 'd1', sessionId: 'bob-live-1', text: 'what is on my plate', context: 'User:   what is on my plate  ' }]);
+    expect(result.effects).toEqual([{ type: 'submit', delegationId: 'd1', sessionId: 'main-live-1', text: 'what is on my plate', context: 'User:   what is on my plate  ' }]);
     expect(result.state.delegation?.id).toBe('d1');
   });
 
@@ -117,7 +117,7 @@ describe('delegation routing', () => {
   it('a correction while working steers the running turn and re-targets the result', () => {
     const working = transition(connected(), delegation('d1', 'book it for Friday')).state;
     const corrected = transition(working, delegation('d2', 'no, Thursday not Friday'));
-    expect(corrected.effects).toEqual([{ type: 'steer', delegationId: 'd2', sessionId: 'bob-live-1', text: 'no, Thursday not Friday' }]);
+    expect(corrected.effects).toEqual([{ type: 'steer', delegationId: 'd2', sessionId: 'main-live-1', text: 'no, Thursday not Friday' }]);
     expect(corrected.state.delegation?.id).toBe('d2');
     const done = transition(corrected.state, { type: 'WORK_RESULT', text: 'Booked Thursday.' });
     expect(done.effects).toEqual([{ type: 'say', delegationId: 'd2', text: 'Booked Thursday.' }]);
@@ -127,7 +127,7 @@ describe('delegation routing', () => {
     const working = transition(connected(), delegation('d1', 'book it')).state;
     const corrected = transition(working, delegation('d2', 'actually make it two')).state;
     expect(transition(corrected, { type: 'STEER_RESULT', accepted: false }).effects).toEqual([
-      { type: 'submit', delegationId: 'd2', sessionId: 'bob-live-1', text: 'actually make it two', context: 'User: actually make it two' },
+      { type: 'submit', delegationId: 'd2', sessionId: 'main-live-1', text: 'actually make it two', context: 'User: actually make it two' },
     ]);
     expect(transition(corrected, { type: 'STEER_RESULT', accepted: true }).effects).toEqual([]);
   });
@@ -137,7 +137,7 @@ describe('delegation routing', () => {
     expect(working.queued).toHaveLength(1);
     const cancelled = transition(working, delegation('d3', 'never mind, cancel that'));
     expect(cancelled.effects).toEqual([
-      { type: 'interrupt', delegationId: 'd3', sessionId: 'bob-live-1' },
+      { type: 'interrupt', delegationId: 'd3', sessionId: 'main-live-1' },
       { type: 'say', delegationId: 'd3', text: CANCELLED_TEXT },
     ]);
     expect(cancelled.state.phase).toBe('live');
@@ -156,7 +156,7 @@ describe('delegation routing', () => {
     const done = transition(queued.state, { type: 'WORK_RESULT', text: 'first done' });
     expect(done.effects).toEqual([
       { type: 'say', delegationId: 'd1', text: 'first done' },
-      { type: 'submit', delegationId: 'd2', sessionId: 'bob-live-1', text: 'second', context: 'User: second' },
+      { type: 'submit', delegationId: 'd2', sessionId: 'main-live-1', text: 'second', context: 'User: second' },
     ]);
     expect(done.state.phase).toBe('working');
     expect(done.state.delegation?.id).toBe('d2');

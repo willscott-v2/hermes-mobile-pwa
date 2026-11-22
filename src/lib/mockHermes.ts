@@ -37,6 +37,14 @@ function normalizeProfileTag(profile?: string): string {
 // Untagged rows are the default profile.
 const sessions: HermesSession[] = RAW_MOCK_SESSIONS.map((row) => (row.profile ? row : { ...row, profile: 'default' }));
 
+// Mirrors the real store: a hidden (Bot Mode identity) chat is excluded from the ordinary
+// listing but reachable through the profile-scoped server search and by exact id. Mock
+// data only; no personal content.
+const HIDDEN_MOCK_SESSIONS: HermesSession[] = [
+  { id: 'mock-hidden-bot-chat', title: 'Bot Chat', preview: 'Hidden canonical chat, reachable through search only.', updated_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString(), message_count: 33, running: false, source: 'cli', profile: 'default' },
+];
+const allSessions: HermesSession[] = [...sessions, ...HIDDEN_MOCK_SESSIONS];
+
 function filterSessionsByProfile(rows: HermesSession[], profile?: string): HermesSession[] {
   if (!profile || !profile.trim()) return rows;
   const target = normalizeProfileTag(profile);
@@ -94,6 +102,16 @@ export class MockHermesClient {
     return { sessions: rows.slice(offset, offset + limit), total: rows.length, limit, offset };
   }
   async sessions(_auth?: AuthSession, _limit?: number, _profile?: string): Promise<HermesSession[]> { return filterSessionsByProfile(sessions, _profile); }
+  // Like the real route: profile-scoped, matches title/preview (the real server matches id,
+  // message content, then titles), and can return hidden rows the listing never includes.
+  async searchSessions(_auth: AuthSession, query: string, options: { profile?: string; limit?: number } = {}): Promise<HermesSession[]> {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+    return filterSessionsByProfile(allSessions, options.profile)
+      .filter((row) => row.id.toLowerCase().includes(q) || [row.title, row.preview].filter(Boolean).join(' ').toLowerCase().includes(q))
+      .slice(0, limit);
+  }
   async sessionMessages(_auth: AuthSession, session: HermesSession): Promise<ChatMessage[]> { return starterMessages(session); }
   async sessionTranscript(_auth: AuthSession, session: HermesSession): Promise<{ session: HermesSession; messages: ChatMessage[] }> { return { session, messages: starterMessages(session) }; }
   async sessionDetail(_auth: AuthSession, session: HermesSession): Promise<HermesSession> {
@@ -102,7 +120,8 @@ export class MockHermesClient {
       await new Promise<void>((resolve) => { this.releaseHeldDetail = resolve; });
     }
     // Exact id AND profile, like the real endpoint: the same id can exist under two profiles.
-    const found = sessions.find((item) => item.id === session.id && (!session.profile || normalizeProfileTag(item.profile) === normalizeProfileTag(session.profile)));
+    // Hidden rows resolve by id too (the real `GET /api/sessions/{id}` returns hidden=1 rows).
+    const found = allSessions.find((item) => item.id === session.id && (!session.profile || normalizeProfileTag(item.profile) === normalizeProfileTag(session.profile)));
     if (!found) throw new HttpError('Session not found.', 404);
     return found;
   }

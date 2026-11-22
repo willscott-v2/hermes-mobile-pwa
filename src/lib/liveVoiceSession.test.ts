@@ -119,7 +119,7 @@ describe('LiveVoiceSession commands', () => {
     const says = channel.json().filter((frame) => frame.type === 'session.commentary.append');
     expect(says.length).toBeGreaterThan(1);
     expect(says.every((frame) => frame.delegation_id === 'd1' && String(frame.content).length <= 1400)).toBe(true);
-    session.think('d1', 'Bob is working: terminal.');
+    session.think('d1', 'Hermes is working: terminal.');
     expect(channel.json().at(-1)).toMatchObject({ type: 'session.thinking.append', delegation_id: 'd1' });
   });
 

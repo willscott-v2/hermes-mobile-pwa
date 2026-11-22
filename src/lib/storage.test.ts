@@ -264,7 +264,7 @@ describe('active profile preference (host-scoped, minimal)', () => {
      });
 });
 
-describe('Bob main reference (pinned default-profile session)', () => {
+describe('pinned chat references (default-profile session, per slot)', () => {
   const scopeFor = (url: string, profile: string | undefined = 'default') => ({ ...(() => {
     const parsed = new URL(url);
     return { origin: parsed.origin, basePath: parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/, '') : '' };
@@ -273,74 +273,116 @@ describe('Bob main reference (pinned default-profile session)', () => {
   it('round-trips a pinned session id and optional title for the same host, base path and default profile', async () => {
     const storage = await loadStorage();
     const scope = scopeFor('https://host:9119/hermes');
-    expect(storage.saveBobMainReference(scope, { sessionId: 'sess-bob', title: 'Bob' })).toBe(true);
-    expect(storage.loadBobMainReference(scope)).toEqual({ sessionId: 'sess-bob', title: 'Bob', savedAt: expect.any(String) });
+    expect(storage.savePinnedChat('main', scope, { sessionId: 'sess-main', title: 'Main' })).toBe(true);
+    expect(storage.loadPinnedChat('main', scope)).toEqual({ sessionId: 'sess-main', title: 'Main', savedAt: expect.any(String) });
   });
 
   it('is scoped by origin and base path: other hosts read nothing and keep their own pin', async () => {
     const storage = await loadStorage();
-    storage.saveBobMainReference(scopeFor('https://host:9119/hermes'), { sessionId: 'a' });
-    storage.saveBobMainReference(scopeFor('https://other:9119'), { sessionId: 'b' });
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119/hermes'))?.sessionId).toBe('a');
-    expect(storage.loadBobMainReference(scopeFor('https://other:9119'))?.sessionId).toBe('b');
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119/other'))).toBeNull();
-    expect(storage.loadBobMainReference(scopeFor('https://third:9119'))).toBeNull();
+    storage.savePinnedChat('main', scopeFor('https://host:9119/hermes'), { sessionId: 'a' });
+    storage.savePinnedChat('main', scopeFor('https://other:9119'), { sessionId: 'b' });
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119/hermes'))?.sessionId).toBe('a');
+    expect(storage.loadPinnedChat('main', scopeFor('https://other:9119'))?.sessionId).toBe('b');
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119/other'))).toBeNull();
+    expect(storage.loadPinnedChat('main', scopeFor('https://third:9119'))).toBeNull();
   });
 
   it('never crosses profiles: a non-default scope can neither save nor load the pin', async () => {
     const storage = await loadStorage();
     const base = scopeFor('https://host:9119');
-    expect(storage.saveBobMainReference({ ...base, profile: 'sales-test' }, { sessionId: 'x' })).toBe(false);
-    expect(storage.saveBobMainReference({ ...base, profile: undefined }, { sessionId: 'x' })).toBe(false);
-    storage.saveBobMainReference(base, { sessionId: 'sess-bob' });
-    expect(storage.loadBobMainReference({ ...base, profile: 'sales-test' })).toBeNull();
-    expect(storage.loadBobMainReference({ ...base, profile: undefined })).toBeNull();
+    expect(storage.savePinnedChat('main', { ...base, profile: 'sales-test' }, { sessionId: 'x' })).toBe(false);
+    expect(storage.savePinnedChat('main', { ...base, profile: undefined }, { sessionId: 'x' })).toBe(false);
+    storage.savePinnedChat('main', base, { sessionId: 'sess-main' });
+    expect(storage.loadPinnedChat('main', { ...base, profile: 'sales-test' })).toBeNull();
+    expect(storage.loadPinnedChat('main', { ...base, profile: undefined })).toBeNull();
   });
 
   it('refuses blank ids and new- placeholders without writing', async () => {
     const storage = await loadStorage();
     const scope = scopeFor('https://host:9119');
-    expect(storage.saveBobMainReference(scope, { sessionId: '  ' })).toBe(false);
-    expect(storage.saveBobMainReference(scope, { sessionId: 'new-123' })).toBe(false);
-    expect(storage.saveBobMainReference({ origin: 'ftp://host', basePath: '', profile: 'default' }, { sessionId: 'x' })).toBe(false);
-    expect(storage.appStorageKeys().filter((key) => key.includes('bob-main'))).toEqual([]);
+    expect(storage.savePinnedChat('main', scope, { sessionId: '  ' })).toBe(false);
+    expect(storage.savePinnedChat('main', scope, { sessionId: 'new-123' })).toBe(false);
+    expect(storage.savePinnedChat('main', { origin: 'ftp://host', basePath: '', profile: 'default' }, { sessionId: 'x' })).toBe(false);
+    expect(storage.appStorageKeys().filter((key) => key.includes('main-chat'))).toEqual([]);
   });
 
   it('stores only id, capped title and timestamp: no previews, messages or credentials', async () => {
     const storage = await loadStorage();
-    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'sess-bob', title: 'x'.repeat(100), ...({ preview: 'secret preview', messages: ['hi'] } as object) } as never);
-    const key = storage.appStorageKeys().find((candidate) => candidate.includes('bob-main'))!;
+    storage.savePinnedChat('main', scopeFor('https://host:9119'), { sessionId: 'sess-main', title: 'x'.repeat(100), ...({ preview: 'secret preview', messages: ['hi'] } as object) } as never);
+    const key = storage.appStorageKeys().find((candidate) => candidate.includes('main-chat'))!;
     const raw = store.getItem(key)!;
     expect(raw).not.toContain('preview');
     expect(raw).not.toContain('messages');
     expect(raw).not.toContain('token');
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))?.title).toHaveLength(80);
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119'))?.title).toHaveLength(80);
   });
 
   it('clear removes only the given scope', async () => {
     const storage = await loadStorage();
-    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'a' });
-    storage.saveBobMainReference(scopeFor('https://other:9119'), { sessionId: 'b' });
-    storage.clearBobMainReference(scopeFor('https://host:9119'));
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
-    expect(storage.loadBobMainReference(scopeFor('https://other:9119'))?.sessionId).toBe('b');
+    storage.savePinnedChat('main', scopeFor('https://host:9119'), { sessionId: 'a' });
+    storage.savePinnedChat('main', scopeFor('https://other:9119'), { sessionId: 'b' });
+    storage.clearPinnedChat('main', scopeFor('https://host:9119'));
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.loadPinnedChat('main', scopeFor('https://other:9119'))?.sessionId).toBe('b');
   });
 
   it('survives corrupt or wrong-version data by reading nothing', async () => {
     const storage = await loadStorage();
-    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'a' });
-    const key = storage.appStorageKeys().find((candidate) => candidate.includes('bob-main'))!;
+    storage.savePinnedChat('main', scopeFor('https://host:9119'), { sessionId: 'a' });
+    const key = storage.appStorageKeys().find((candidate) => candidate.includes('main-chat'))!;
     store.setItem(key, '{not json');
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119'))).toBeNull();
     store.setItem(key, JSON.stringify({ v: 1, entries: {} }));
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119'))).toBeNull();
   });
 
   it('is removed by forgetThisDevice', async () => {
     const storage = await loadStorage();
-    storage.saveBobMainReference(scopeFor('https://host:9119'), { sessionId: 'a' });
+    storage.savePinnedChat('main', scopeFor('https://host:9119'), { sessionId: 'a' });
     storage.forgetThisDevice();
-    expect(storage.loadBobMainReference(scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.loadPinnedChat('main', scopeFor('https://host:9119'))).toBeNull();
+    expect(storage.appStorageKeys()).toEqual([]);
+  });
+
+  it('keeps the two slots independent: the second slot never touches the main pin', async () => {
+    const storage = await loadStorage();
+    const scope = scopeFor('https://host:9119');
+    storage.savePinnedChat('main', scope, { sessionId: 'sess-main', title: 'Main' });
+    expect(storage.savePinnedChat('pinned', scope, { sessionId: 'sess-inbox', title: 'Bot Chat' })).toBe(true);
+    expect(storage.loadPinnedChat('pinned', scope)).toEqual({ sessionId: 'sess-inbox', title: 'Bot Chat', savedAt: expect.any(String) });
+    storage.clearPinnedChat('pinned', scope);
+    expect(storage.loadPinnedChat('pinned', scope)).toBeNull();
+    expect(storage.loadPinnedChat('main', scope)?.sessionId).toBe('sess-main');
+    expect(storage.appStorageKeys().filter((key) => key.includes('pinned-chat'))).toEqual([]);
+  });
+
+  it('second slot is per host and default-profile only', async () => {
+    const storage = await loadStorage();
+    const base = scopeFor('https://host:9119');
+    storage.savePinnedChat('pinned', base, { sessionId: 'a' });
+    expect(storage.loadPinnedChat('pinned', scopeFor('https://other:9119'))).toBeNull();
+    expect(storage.savePinnedChat('pinned', { ...base, profile: 'sales-test' }, { sessionId: 'x' })).toBe(false);
+    expect(storage.loadPinnedChat('pinned', { ...base, profile: 'sales-test' })).toBeNull();
+  });
+
+  it('assignPinnedChat moves a session out of the other slot', async () => {
+    const storage = await loadStorage();
+    const scope = scopeFor('https://host:9119');
+    storage.savePinnedChat('main', scope, { sessionId: 'sess-1' });
+    expect(storage.assignPinnedChat('pinned', scope, { sessionId: 'sess-1' })).toEqual({ saved: true, movedFrom: 'main' });
+    expect(storage.loadPinnedChat('main', scope)).toBeNull();
+    expect(storage.loadPinnedChat('pinned', scope)?.sessionId).toBe('sess-1');
+    expect(storage.assignPinnedChat('main', scope, { sessionId: 'sess-2' })).toEqual({ saved: true, movedFrom: null });
+    expect(storage.loadPinnedChat('pinned', scope)?.sessionId).toBe('sess-1');
+    expect(storage.assignPinnedChat('main', scope, { sessionId: 'new-9' })).toEqual({ saved: false, movedFrom: null });
+    expect(storage.loadPinnedChat('main', scope)?.sessionId).toBe('sess-2');
+  });
+
+  it('forgetThisDevice also removes retired app keys such as an old pin key', async () => {
+    const storage = await loadStorage();
+    store.setItem('hermes-mobile-pwa.retired-pin.v1', '{"v":2,"entries":{}}');
+    storage.savePinnedChat('pinned', scopeFor('https://host:9119'), { sessionId: 'a' });
+    storage.forgetThisDevice();
     expect(storage.appStorageKeys()).toEqual([]);
   });
 });

@@ -10,16 +10,23 @@ const CONTINUE_KEY = 'hermes-mobile-pwa.continue.v2';
 // The active profile is a host-scoped app preference, kept separate from the
 // per-scope continue reference (which is profile-scoped).
 const ACTIVE_PROFILE_KEY = 'hermes-mobile-pwa.active-profile.v1';
-// The explicitly pinned "Bob main" session. One map entry per host/base path, always for the
-// `default` profile; it holds a session id + optional title and nothing else.
-const BOB_MAIN_KEY = 'hermes-mobile-pwa.bob-main.v1';
-const BOB_MAIN_PROFILE = 'default';
+// Explicitly pinned default-profile sessions, in two slots: `main` (the "Talk to" shortcut, which
+// opens with voice on) and `pinned` (a second one-tap chat, opened in text mode). One map entry per
+// host/base path per slot, always for the `default` profile; it holds a session id + optional title
+// and nothing else.
+export type PinSlot = 'main' | 'pinned';
+export const PIN_SLOTS: readonly PinSlot[] = ['main', 'pinned'];
+const PIN_KEYS: Record<PinSlot, string> = {
+  main: 'hermes-mobile-pwa.main-chat.v1',
+  pinned: 'hermes-mobile-pwa.pinned-chat.v1',
+};
+const PINNED_PROFILE = 'default';
 const SCHEMA_KEY = 'hermes-mobile-pwa.schema-version';
 const LEGACY_KEYS = ['hermes-mobile-pwa.sessions-cache.v1', 'hermes-mobile-pwa.last-session-id'];
 
 export interface StorageScope { origin: string; basePath: string; profile?: string }
 export interface ContinueReference { sessionId: string; title?: string; savedAt: string }
-export interface BobMainReference { sessionId: string; title?: string; savedAt: string }
+export interface PinnedChatReference { sessionId: string; title?: string; savedAt: string }
 
 export interface LoginHint {
   username?: string;
@@ -192,58 +199,73 @@ export function clearActiveProfile(): void {
   window.localStorage.removeItem(ACTIVE_PROFILE_KEY);
 }
 
-function bobMainEntryKey(scope: StorageScope): string | null {
-  if (scope.profile !== BOB_MAIN_PROFILE) return null; // exact match: never cross profiles
+function pinEntryKey(scope: StorageScope): string | null {
+  if (scope.profile !== PINNED_PROFILE) return null; // exact match: never cross profiles
   if (!scope.origin.startsWith('http://') && !scope.origin.startsWith('https://')) return null;
   return `${scope.origin}${scope.basePath ?? ''}`;
 }
 
-function readBobMainEntries(): Record<string, BobMainReference> {
-  const raw = window.localStorage.getItem(BOB_MAIN_KEY);
+function readPinEntries(slot: PinSlot): Record<string, PinnedChatReference> {
+  const raw = window.localStorage.getItem(PIN_KEYS[slot]);
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw) as { v?: unknown; entries?: unknown };
     if (parsed?.v !== STORAGE_SCHEMA_VERSION || !parsed.entries || typeof parsed.entries !== 'object') return {};
-    return parsed.entries as Record<string, BobMainReference>;
+    return parsed.entries as Record<string, PinnedChatReference>;
   } catch {
-    window.localStorage.removeItem(BOB_MAIN_KEY);
+    window.localStorage.removeItem(PIN_KEYS[slot]);
     return {};
   }
 }
 
-function writeBobMainEntries(entries: Record<string, BobMainReference>): void {
+function writePinEntries(slot: PinSlot, entries: Record<string, PinnedChatReference>): void {
   if (Object.keys(entries).length === 0) {
-    window.localStorage.removeItem(BOB_MAIN_KEY);
+    window.localStorage.removeItem(PIN_KEYS[slot]);
     return;
   }
-  window.localStorage.setItem(BOB_MAIN_KEY, JSON.stringify({ v: STORAGE_SCHEMA_VERSION, entries }));
+  window.localStorage.setItem(PIN_KEYS[slot], JSON.stringify({ v: STORAGE_SCHEMA_VERSION, entries }));
 }
 
-export function saveBobMainReference(scope: StorageScope, ref: { sessionId: string; title?: string }): boolean {
-  const key = bobMainEntryKey(scope);
+export function savePinnedChat(slot: PinSlot, scope: StorageScope, ref: { sessionId: string; title?: string }): boolean {
+  const key = pinEntryKey(scope);
   const sessionId = ref.sessionId?.trim();
   if (!key || !sessionId || sessionId.startsWith('new-')) return false;
   const title = ref.title?.trim();
-  writeBobMainEntries({
-    ...readBobMainEntries(),
+  writePinEntries(slot, {
+    ...readPinEntries(slot),
     [key]: { sessionId, savedAt: new Date().toISOString(), ...(title ? { title: title.slice(0, 80) } : {}) },
   });
   return true;
 }
 
-export function loadBobMainReference(scope: StorageScope): BobMainReference | null {
-  const key = bobMainEntryKey(scope);
+export function loadPinnedChat(slot: PinSlot, scope: StorageScope): PinnedChatReference | null {
+  const key = pinEntryKey(scope);
   if (!key) return null;
-  const entry = readBobMainEntries()[key];
+  const entry = readPinEntries(slot)[key];
   if (!entry || typeof entry.sessionId !== 'string' || !entry.sessionId) return null;
   return { sessionId: entry.sessionId, title: typeof entry.title === 'string' ? entry.title : undefined, savedAt: String(entry.savedAt ?? '') };
 }
 
-export function clearBobMainReference(scope: StorageScope): void {
-  const key = bobMainEntryKey(scope);
+export function clearPinnedChat(slot: PinSlot, scope: StorageScope): void {
+  const key = pinEntryKey(scope);
   if (!key) return;
-  const { [key]: _removed, ...rest } = readBobMainEntries();
-  writeBobMainEntries(rest);
+  const { [key]: _removed, ...rest } = readPinEntries(slot);
+  writePinEntries(slot, rest);
+}
+
+// A session lives in at most one slot: pinning it into `slot` removes it from the other one.
+// Returns whether it saved and which slot (if any) it was moved out of.
+export function assignPinnedChat(slot: PinSlot, scope: StorageScope, ref: { sessionId: string; title?: string }): { saved: boolean; movedFrom: PinSlot | null } {
+  if (!savePinnedChat(slot, scope, ref)) return { saved: false, movedFrom: null };
+  const sessionId = ref.sessionId.trim();
+  let movedFrom: PinSlot | null = null;
+  for (const other of PIN_SLOTS) {
+    if (other !== slot && loadPinnedChat(other, scope)?.sessionId === sessionId) {
+      clearPinnedChat(other, scope);
+      movedFrom = other;
+    }
+  }
+  return { saved: true, movedFrom };
 }
 
 export function loadSessionCache(): HermesSession[] {
@@ -258,7 +280,8 @@ export function saveSessionCache(sessions: HermesSession[]): void {
 }
 
 export function forgetThisDevice(): string[] {
-  const keys = [CONTINUE_KEY, ACTIVE_PROFILE_KEY, BOB_MAIN_KEY, SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS];
+  // Every app key, including retired ones (an old pin key from an earlier build), not just the current set.
+  const keys = Array.from(new Set([CONTINUE_KEY, ACTIVE_PROFILE_KEY, ...Object.values(PIN_KEYS), SCHEMA_KEY, TOKEN_KEY, SERVER_KEY, LOGIN_HINT_KEY, ...LEGACY_KEYS, ...appStorageKeys()]));
   const removed: string[] = [];
   for (const key of keys) {
     if (window.localStorage.getItem(key) !== null) {

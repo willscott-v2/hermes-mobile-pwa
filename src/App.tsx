@@ -1,4 +1,4 @@
-import { ArrowLeft, Bot, CheckCircle2, ChevronDown, CircleAlert, Clock3, Lock, MessageCircle, Mic, Paperclip, Plus, Radio, RefreshCw, Search, SendHorizonal, Settings, ShieldCheck, Sparkles, Star, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, ChevronDown, CircleAlert, Clock3, Lock, MessageCircle, Mic, Paperclip, Pin, Plus, Radio, RefreshCw, Search, SendHorizonal, Settings, ShieldCheck, Sparkles, Star, WifiOff, X } from 'lucide-react';
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { approvalActionAvailability, AttachmentResult, attentionFromEvent, clarifyServerRequestResult, shouldDeclineOnPhone, AttentionRequest, AuthCapability, AuthMode, AuthSession, ChatMessage, eventToMessages, GatewayHandle, HermesApiClient, HermesSession, HistoryPage, HttpError, isAuthError, isNotFoundError, redactForLog, PreparedAttachment, RuntimeModelOption, RuntimeOptions, RuntimeSelection, SessionPage, normalizeServerUrl, VoiceLiveStatus } from './lib/hermesApi';
 import { describeSendFailure, prepareAttachment, uploadPrepared } from './lib/attachments';
@@ -6,7 +6,8 @@ import { MockHermesClient, starterMessages } from './lib/mockHermes';
 import { VoiceControls } from './components/VoiceControls';
 import { useVoiceController } from './hooks/useVoiceController';
 import { useLiveVoice } from './hooks/useLiveVoice';
-import { BOB_PROFILE, canPinAsBobMain, resolveBobMain } from './lib/bobMain';
+import { canPinChat, PINNED_PROFILE, resolvePinnedChat } from './lib/pinnedChat';
+import { ASSISTANT_NAME } from './lib/assistantName';
 import { browserAudioEnv } from './lib/browserAudio';
 import { BrowserLiveRtcEnv } from './lib/browserLiveRtc';
 import { ChainedVoiceBackend } from './lib/chainedVoiceBackend';
@@ -21,8 +22,10 @@ import { compactMessagesForMobile } from './lib/mobileText';
 import { ConnectionView, deriveConnectionView } from './lib/connectionState';
 import { applyHistoryPage, beginHistoryLoad, createHistoryState, failHistoryLoad, historyPresentation, HistoryPresentation, HistoryScope, historyScopeKey, HistoryState } from './lib/history';
 import { AttentionState, beginResponse, createAttentionState, markDisconnected, markSendFailed, markSent, reconcileEvent, reconcileResume, requestKey, showAttention } from './lib/attentionState';
-import { appStorageKeys, BobMainReference, clearBobMainReference, clearContinueReference, clearRememberedToken, forgetThisDevice, loadActiveProfile, loadBobMainReference, loadContinueReference, loadLoginHint, loadRememberedToken, loadServerUrl, migrateLegacyStorage, saveActiveProfile, saveBobMainReference, saveContinueReference, saveLoginHint, saveRememberedToken, saveServerUrl, scopeFromServerUrl, StorageScope } from './lib/storage';
+import { appStorageKeys, assignPinnedChat, clearContinueReference, clearPinnedChat, clearRememberedToken, forgetThisDevice, loadActiveProfile, loadContinueReference, loadPinnedChat, loadLoginHint, loadRememberedToken, loadServerUrl, migrateLegacyStorage, PinnedChatReference, PinSlot, saveActiveProfile, saveContinueReference, saveLoginHint, saveRememberedToken, saveServerUrl, scopeFromServerUrl, StorageScope } from './lib/storage';
 import { admitSessionsForProfile, historyPageBelongsToScope, isProfileActionStale, resolveActiveProfile, seedNewChatSelection, sessionRowKey } from './lib/profileScope';
+import { mergeSearchResults, searchQueryForServer } from './lib/sessionSearch';
+import { viewportLayoutVars } from './lib/viewportLayout';
 
 type Client = HermesApiClient | MockHermesClient;
 type Screen = 'connect' | 'sessions' | 'chat';
@@ -103,23 +106,31 @@ interface ContinueTarget {
   loaded: boolean; // true when the session is present in the loaded list page
 }
 
-type BobDialog = { kind: 'setup' } | { kind: 'stale' } | { kind: 'manage' } | { kind: 'error'; message: string };
+type PinDialog = { slot: PinSlot; kind: 'setup' | 'stale' | 'manage' } | { slot: PinSlot; kind: 'error'; message: string };
+type PinnedChats = Record<PinSlot, PinnedChatReference | null>;
+const NO_PINS: PinnedChats = { main: null, pinned: null };
+// The main pin's label, e.g. "Hermes main" (or "<VITE_ASSISTANT_NAME> main" in a configured build).
+const MAIN_PIN_LABEL = `${ASSISTANT_NAME} main`;
 // Monotonic counters (open generation, profile-load generation) captured to detect later navigation.
 type NavigationMarks = { open: number; load: number };
 
-// Mock mode has no real origin; the pin gets a synthetic, clearly fake host so it still persists
-// and stays isolated from any real host's pin.
-const MOCK_BOB_SCOPE: StorageScope = { origin: 'https://mock.hermes.invalid', basePath: '', profile: BOB_PROFILE };
+// Mock mode has no real origin; pins get a synthetic, clearly fake host so they still persist
+// and stay isolated from any real host's pins.
+const MOCK_PIN_SCOPE: StorageScope = { origin: 'https://mock.hermes.invalid', basePath: '', profile: PINNED_PROFILE };
 
-function bobScopeFor(activeClient: Client | null): StorageScope | null {
+function pinScopeFor(activeClient: Client | null): StorageScope | null {
   if (!activeClient) return null;
-  if (activeClient.baseUrl.startsWith('mock')) return MOCK_BOB_SCOPE;
-  return scopeFromServerUrl(activeClient.baseUrl, BOB_PROFILE);
+  if (activeClient.baseUrl.startsWith('mock')) return MOCK_PIN_SCOPE;
+  return scopeFromServerUrl(activeClient.baseUrl, PINNED_PROFILE);
+}
+
+function loadPins(scope: StorageScope | null): PinnedChats {
+  return scope ? { main: loadPinnedChat('main', scope), pinned: loadPinnedChat('pinned', scope) } : NO_PINS;
 }
 
 function createFakeVoiceBackend(): FakeVoiceBackend {
   const backend = new FakeVoiceBackend();
-  backend.auto = { listen: true, transcript: 'Hello Bob, what is on my plate today?', deny: null, speak: true, failSpeech: false, fallbackSpeech: false };
+  backend.auto = { listen: true, transcript: 'Hello there, what is on my plate today?', deny: null, speak: true, failSpeech: false, fallbackSpeech: false };
   return backend;
 }
 
@@ -139,6 +150,10 @@ export function App() {
   const [sessionPage, setSessionPage] = useState<Pick<SessionPage, 'total' | 'limit' | 'offset'>>({ limit: 75, offset: 0 });
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionFilter, setSessionFilter] = useState('');
+  // Server-side search results for the current filter (profile-scoped; may include hidden
+  // rows the recent list cannot contain). `query` records what the rows answer so stale
+  // responses never apply to a newer filter or profile.
+  const [serverSearch, setServerSearch] = useState<{ query: string; profile: string; rows: HermesSession[]; state: 'idle' | 'searching' | 'done' | 'error' }>({ query: '', profile: '', rows: [], state: 'idle' });
   const [continueTarget, setContinueTarget] = useState<ContinueTarget | null>(null);
   const [activeSession, setActiveSession] = useState<HermesSession | null>(null);
   const [history, setHistory] = useState<HistoryState | null>(null);
@@ -151,9 +166,9 @@ export function App() {
   const [banner, setBanner] = useState('');
   const [lineageNote, setLineageNote] = useState('');
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [bobRef, setBobRef] = useState<BobMainReference | null>(null);
-  const [bobBusy, setBobBusy] = useState(false);
-  const [bobDialog, setBobDialog] = useState<BobDialog | null>(null);
+  const [pins, setPins] = useState<PinnedChats>(NO_PINS);
+  const [pinBusy, setPinBusy] = useState<PinSlot | null>(null);
+  const [pinDialog, setPinDialog] = useState<PinDialog | null>(null);
   const gatewayRef = useRef<GatewayHandle | null>(null);
   const liveSessionIdRef = useRef<string>('');
   const [liveSessionId, setLiveSessionIdState] = useState('');
@@ -284,11 +299,34 @@ export function App() {
     })();
   }, []);
 
-  const filteredSessions = useMemo(() => {
-    const q = sessionFilter.trim().toLowerCase();
-    if (!q) return sessions;
-    return sessions.filter((session) => [session.title, session.preview, session.workspace, session.source].filter(Boolean).join(' ').toLowerCase().includes(q));
-  }, [sessions, sessionFilter]);
+  // Conversations search: loaded rows filter instantly; the profile-scoped server search
+  // (debounced) adds matches the recent list cannot contain — e.g. a hidden canonical chat.
+  // The ordinary listing itself is never widened to hidden rows.
+  useEffect(() => {
+    const query = searchQueryForServer(sessionFilter);
+    const profile = activeProfile;
+    if (!query || !client || !auth) {
+      setServerSearch((current) => (current.state === 'idle' && current.rows.length === 0 ? current : { query: '', profile, rows: [], state: 'idle' }));
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setServerSearch({ query, profile, rows: [], state: 'searching' });
+      client.searchSessions(auth, query, { profile, limit: 20 })
+        .then((rows) => { if (!cancelled) setServerSearch({ query, profile, rows, state: 'done' }); })
+        .catch(() => { if (!cancelled) setServerSearch({ query, profile, rows: [], state: 'error' }); });
+    }, 250);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [sessionFilter, activeProfile, client, auth]);
+
+  const serverSearchCurrent = serverSearch.profile === activeProfile && serverSearch.query === searchQueryForServer(sessionFilter);
+  const filteredSessions = useMemo(() => mergeSearchResults({
+    loaded: sessions,
+    remote: serverSearchCurrent ? serverSearch.rows : [],
+    query: sessionFilter,
+    profile: activeProfile,
+  }), [sessions, sessionFilter, activeProfile, serverSearch, serverSearchCurrent]);
+  const loadedRowKeys = useMemo(() => new Set(sessions.map((session) => sessionRowKey(session.id, session.profile))), [sessions]);
 
   const modelSelectOptions = useMemo(() => {
     const models = runtimeOptions.models.length ? runtimeOptions.models : fallbackModelOptions(runtimeSelection);
@@ -327,16 +365,17 @@ export function App() {
 
   useEffect(() => {
     const setViewportVars = () => {
-      const viewport = window.visualViewport;
-      const keyboardInset = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
-      const viewportHeight = viewport?.height ?? window.innerHeight;
-      const hasKeyboard = keyboardInset > 80 || (viewport ? viewport.height < window.innerHeight * 0.78 : false);
+      const vars = viewportLayoutVars({ innerHeight: window.innerHeight, viewport: window.visualViewport });
       const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 72;
-      document.documentElement.style.setProperty('--visual-viewport-height', `${viewportHeight}px`);
-      document.documentElement.style.setProperty('--keyboard-inset-bottom', `${keyboardInset}px`);
+      document.documentElement.style.setProperty('--visual-viewport-height', vars['--visual-viewport-height']);
+      // iOS pans the visual viewport inside the layout viewport while the keyboard is up;
+      // the shell follows this offset (styles.css .app-shell) so its bottom edge never
+      // clips the focused field with body background showing beneath.
+      document.documentElement.style.setProperty('--visual-viewport-offset-top', vars['--visual-viewport-offset-top']);
+      document.documentElement.style.setProperty('--keyboard-inset-bottom', vars['--keyboard-inset-bottom']);
       document.documentElement.style.setProperty('--composer-height', `${Math.ceil(composerHeight)}px`);
-      document.documentElement.style.setProperty('--composer-bottom-buffer', hasKeyboard ? '8px' : '18px');
-      document.documentElement.style.setProperty('--composer-safe-area-bottom', hasKeyboard ? '0px' : 'env(safe-area-inset-bottom)');
+      document.documentElement.style.setProperty('--composer-bottom-buffer', vars.hasKeyboard ? '8px' : '18px');
+      document.documentElement.style.setProperty('--composer-safe-area-bottom', vars.hasKeyboard ? '0px' : 'env(safe-area-inset-bottom)');
     };
     setViewportVars();
     window.visualViewport?.addEventListener('resize', setViewportVars);
@@ -479,7 +518,7 @@ export function App() {
     } catch (error) {
       const message = error instanceof HttpError
         ? `Hermes answered with an error (${error.status}). Retry or check the dashboard service.`
-        : 'Couldn’t reach Bob’s House. Check internet and Tailscale, then retry.';
+        : 'Couldn’t reach your Hermes server. Check internet and Tailscale, then retry.';
       setConnection((state) => ({ ...state, status: 'error', message }));
     }
   }
@@ -542,8 +581,8 @@ export function App() {
     setHasLocalData(false);
     gatewayRef.current?.close();
     clearAttachments();
-    setBobRef(null);
-    setBobDialog(null);
+    setPins(NO_PINS);
+    setPinDialog(null);
     setVoiceOpen(false);
     setClient(null);
     setAuth(null);
@@ -1108,7 +1147,7 @@ export function App() {
     ? 'Voice is available once the chat is ready.'
     : composerBlockedByAttention
       ? 'Answer the pending request above first.'
-      : chatStatus === 'running' && !liveEngine // live voice keeps talking while Bob works (steer/queue routing)
+      : chatStatus === 'running' && !liveEngine // live voice keeps talking while the agent works (steer/queue routing)
         ? 'Hermes is working. Voice is available when this turn finishes.'
         : chatStatus === 'lost' || chatStatus === 'disconnected'
           ? 'Reconnect to use voice.'
@@ -1208,54 +1247,63 @@ export function App() {
     setVoiceOpen(true);
   }
 
-  // ---- Bob main: an explicitly pinned default-profile session; never guessed, never created. ----
+  // ---- Pinned chats: explicitly pinned default-profile sessions; never guessed, never created. ----
+  // `main` is the "Talk to" shortcut (opens with voice on); `pinned` is a second one-tap chat (opens in
+  // text mode; the Voice toggle still works there like in any chat). A session sits in at most one slot.
   useEffect(() => {
-    const scope = bobScopeFor(client);
-    setBobRef(scope ? loadBobMainReference(scope) : null);
+    setPins(loadPins(pinScopeFor(client)));
   }, [client]);
 
-  const inDefaultChat = screen === 'chat' && canPinAsBobMain(activeSession) && (activeSession?.profile?.trim() || activeProfile) === BOB_PROFILE;
-  const isCurrentBob = Boolean(bobRef && activeSession && (bobRef.sessionId === activeSession.id || bobRef.sessionId === openedIdRef.current));
+  const inDefaultChat = screen === 'chat' && canPinChat(activeSession) && (activeSession?.profile?.trim() || activeProfile) === PINNED_PROFILE;
+  const pinnedHere = (reference: PinnedChatReference | null) => Boolean(reference && activeSession && (reference.sessionId === activeSession.id || reference.sessionId === openedIdRef.current));
+  const isCurrentMain = pinnedHere(pins.main);
+  const isCurrentPinned = pinnedHere(pins.pinned);
 
-  function toggleBobMain() {
-    const scope = bobScopeFor(client);
+  function togglePin(slot: PinSlot) {
+    const scope = pinScopeFor(client);
     if (!scope || !activeSession) return;
-    if (isCurrentBob) {
-      clearBobMainReference(scope);
-      setBobRef(null);
-      setBanner('Bob main pin removed.');
+    if (slot === 'main' ? isCurrentMain : isCurrentPinned) {
+      clearPinnedChat(slot, scope);
+      setPins(loadPins(scope));
+      setBanner(slot === 'main' ? `${MAIN_PIN_LABEL} pin removed.` : 'Removed from Conversations.');
       return;
     }
     const sessionId = openedIdRef.current && !openedIdRef.current.startsWith('new-') ? openedIdRef.current : activeSession.id;
-    if (saveBobMainReference(scope, { sessionId, title: activeSession.title })) {
-      setBobRef(loadBobMainReference(scope));
-      setBanner('Bob main set to this chat. Talk to Bob on Conversations opens it.');
-    }
+    const { saved, movedFrom } = assignPinnedChat(slot, scope, { sessionId, title: activeSession.title });
+    if (!saved) return;
+    setPins(loadPins(scope));
+    const moved = movedFrom === 'main' ? ` It is no longer ${MAIN_PIN_LABEL}.` : movedFrom === 'pinned' ? ' It is no longer the pinned chat.' : '';
+    setBanner(slot === 'main'
+      ? `${MAIN_PIN_LABEL} set to this chat. Talk to ${ASSISTANT_NAME} on Conversations opens it.${moved}`
+      : `Pinned to Conversations.${moved}`);
   }
 
-  function clearBobMain() {
-    const scope = bobScopeFor(client);
-    if (scope) clearBobMainReference(scope);
-    setBobRef(null);
-    setBobDialog(null);
+  function clearPin(slot: PinSlot) {
+    const scope = pinScopeFor(client);
+    if (scope) clearPinnedChat(slot, scope);
+    setPins(loadPins(scope));
+    setPinDialog(null);
   }
 
-  async function chooseBobChat() {
-    setBobDialog(null);
-    if (activeProfileRef.current !== BOB_PROFILE) await switchActiveProfile(BOB_PROFILE);
+  async function choosePinChat() {
+    setPinDialog(null);
+    if (activeProfileRef.current !== PINNED_PROFILE) await switchActiveProfile(PINNED_PROFILE);
   }
 
-  async function talkToBob() {
-    if (!client || !auth || bobBusy) return;
-    const scope = bobScopeFor(client);
-    const reference = scope ? loadBobMainReference(scope) : null;
+  async function openPinnedChat(slot: PinSlot) {
+    if (!client || !auth || pinBusy) return;
+    const scope = pinScopeFor(client);
+    const reference = scope ? loadPinnedChat(slot, scope) : null;
     if (!reference) {
-      setBobDialog({ kind: 'setup' });
+      setPinDialog({ slot, kind: 'setup' });
       return;
     }
-    voice.unlockAudio(); // still inside the tap: the only moment mobile Safari lets audio start
-    liveRtcEnv?.unlock();
-    setBobBusy(true);
+    const withVoice = slot === 'main';
+    if (withVoice) {
+      voice.unlockAudio(); // still inside the tap: the only moment mobile Safari lets audio start
+      liveRtcEnv?.unlock();
+    }
+    setPinBusy(slot);
     setBanner('');
     // The intent is exactly this tap: any open-generation, profile-load-generation or screen change after
     // it (including while the profile switch below is still loading) is the user navigating, so it is dropped.
@@ -1263,28 +1311,28 @@ export function App() {
     let marks: NavigationMarks = { open: openGenerationRef.current, load: sessionLoadGenerationRef.current };
     const superseded = () => marks.open !== openGenerationRef.current || marks.load !== sessionLoadGenerationRef.current || startScreen !== screenRef.current;
     try {
-      if (activeProfileRef.current !== BOB_PROFILE) {
+      if (activeProfileRef.current !== PINNED_PROFILE) {
         let switching = false;
-        await switchActiveProfile(BOB_PROFILE, (own) => { marks = own; switching = true; });
+        await switchActiveProfile(PINNED_PROFILE, (own) => { marks = own; switching = true; });
         if (switching && superseded()) return;
-        if (!switching || activeProfileRef.current !== BOB_PROFILE) {
-          setBobDialog({ kind: 'error', message: 'Could not switch to the default profile, so Bob was not opened.' });
+        if (!switching || activeProfileRef.current !== PINNED_PROFILE) {
+          setPinDialog({ slot, kind: 'error', message: `Could not switch to the default profile, so ${withVoice ? ASSISTANT_NAME : 'the pinned chat'} was not opened.` });
           return;
         }
       }
-      const resolution = await resolveBobMain(reference, (target) => client.sessionDetail(auth, target));
-      if (superseded() || activeProfileRef.current !== BOB_PROFILE) return;
+      const resolution = await resolvePinnedChat(reference, (target) => client.sessionDetail(auth, target));
+      if (superseded() || activeProfileRef.current !== PINNED_PROFILE) return;
       if (resolution.kind === 'ok') {
-        await openSession(resolution.session, { openVoice: true });
+        await openSession(resolution.session, { openVoice: withVoice });
       } else if (resolution.kind === 'stale' || resolution.kind === 'none') {
-        setBobDialog({ kind: 'stale' });
+        setPinDialog({ slot, kind: 'stale' });
       } else if (resolution.authExpired) {
         setBanner(handleAuthFailure(new HttpError(resolution.message, 401), resolution.message));
       } else {
-        setBobDialog({ kind: 'error', message: resolution.message });
+        setPinDialog({ slot, kind: 'error', message: resolution.message });
       }
     } finally {
-      setBobBusy(false);
+      setPinBusy(null);
     }
   }
 
@@ -1395,7 +1443,7 @@ export function App() {
   const hostLabel = client && !client.baseUrl.startsWith('mock') ? hostLabelFor(client.baseUrl) : client ? 'Mock demo' : '';
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${screen === 'sessions' ? 'layout-viewport-shell' : ''}`}>
       <header className="topbar">
         {screen === 'chat' ? <button className="icon-btn" onClick={backToSessions} aria-label="Back to sessions"><ArrowLeft size={20} /></button> : <div className="brand-mark"><img src="/icons/icon.svg" alt="Hermes Mobile" /></div>}
         <div>
@@ -1436,16 +1484,28 @@ export function App() {
           <section className="sessions-screen">
             <div className="session-summary"><strong>{sessions.length}</strong><span>{typeof sessionPage.total === 'number' ? ` of ${sessionPage.total} conversations loaded` : ' conversations loaded'}</span></div>
             {banner && <div className="inline-banner"><WifiOff size={16} /> {banner}</div>}
-            <div className="bob-shortcut">
-              <button type="button" className="bob-talk" onClick={() => void talkToBob()} disabled={bobBusy} aria-label={bobBusy ? 'Opening Bob…' : bobRef ? 'Talk to Bob' : 'Set up Talk to Bob'}>
-                <span className="bob-talk-icon" aria-hidden="true"><Mic size={22} /></span>
-                <span className="bob-talk-copy">
-                  <strong>{bobBusy ? 'Opening Bob…' : bobRef ? 'Talk to Bob' : 'Set up Talk to Bob'}</strong>
-                  <small>{bobRef ? (bobRef.title || 'Your pinned main chat') : 'Pin your main chat once'}</small>
+            <div className="pin-shortcut">
+              <button type="button" className="pin-talk" onClick={() => void openPinnedChat('main')} disabled={pinBusy !== null} aria-label={pinBusy === 'main' ? `Opening ${ASSISTANT_NAME}…` : pins.main ? `Talk to ${ASSISTANT_NAME}` : `Set up Talk to ${ASSISTANT_NAME}`}>
+                <span className="pin-talk-icon" aria-hidden="true"><Mic size={22} /></span>
+                <span className="pin-talk-copy">
+                  <strong>{pinBusy === 'main' ? `Opening ${ASSISTANT_NAME}…` : pins.main ? `Talk to ${ASSISTANT_NAME}` : `Set up Talk to ${ASSISTANT_NAME}`}</strong>
+                  <small>{pins.main ? (pins.main.title || 'Your pinned main chat') : 'Pin your main chat once'}</small>
                 </span>
               </button>
-              {bobRef && <button type="button" className="icon-btn bob-settings" aria-label="Bob main settings" onClick={() => setBobDialog({ kind: 'manage' })}><Settings size={18} /></button>}
+              {pins.main && <button type="button" className="icon-btn pin-settings" aria-label={`${MAIN_PIN_LABEL} settings`} onClick={() => setPinDialog({ slot: 'main', kind: 'manage' })}><Settings size={18} /></button>}
             </div>
+            {pins.pinned && (
+              <div className="pin-shortcut">
+                <button type="button" className="pin-chat" onClick={() => void openPinnedChat('pinned')} disabled={pinBusy !== null} aria-label={pinBusy === 'pinned' ? 'Opening pinned chat…' : `Open pinned chat: ${pins.pinned.title || 'Untitled chat'}`}>
+                  <span className="pin-chat-icon" aria-hidden="true"><Pin size={17} /></span>
+                  <span className="pin-chat-copy">
+                    <strong>{pinBusy === 'pinned' ? 'Opening…' : (pins.pinned.title || 'Untitled chat')}</strong>
+                    <small>Pinned chat</small>
+                  </span>
+                </button>
+                <button type="button" className="icon-btn pin-chat-settings" aria-label="Pinned chat settings" onClick={() => setPinDialog({ slot: 'pinned', kind: 'manage' })}><Settings size={16} /></button>
+              </div>
+            )}
             <div className="profile-switcher">
               <CustomSelect
                 label="Active profile"
@@ -1454,7 +1514,10 @@ export function App() {
                 onChange={(profile) => { void switchActiveProfile(profile); }}
               />
             </div>
-            <div className="search-wrap"><Search size={18} /><input placeholder="Search loaded sessions" value={sessionFilter} onChange={(event) => setSessionFilter(event.target.value)} /></div>
+            <div className="search-wrap"><Search size={18} /><input placeholder="Search conversations" aria-label="Search conversations" value={sessionFilter} onChange={(event) => setSessionFilter(event.target.value)} /></div>
+            {sessionFilter.trim() && serverSearchCurrent && serverSearch.state === 'searching' && <div className="search-status" role="status">Searching {activeProfile}…</div>}
+            {sessionFilter.trim() && serverSearchCurrent && serverSearch.state === 'error' && <div className="search-status bad" role="status">Server search unavailable; showing loaded matches only.</div>}
+            {sessionFilter.trim() && serverSearchCurrent && serverSearch.state === 'done' && filteredSessions.length === 0 && <div className="search-status" role="status">No conversations match “{sessionFilter.trim()}” in {activeProfile}.</div>}
             <button className="new-chat" onClick={() => { setRuntimeSelection((current) => ({ ...current, ...seedNewChatSelection(activeProfileRef.current) })); setNewChatSheetOpen(true); }}><Plus size={20} /> New chat</button>
             <div className="session-list" ref={sessionListRef}>
               {continueTarget && !sessionFilter && (
@@ -1464,7 +1527,10 @@ export function App() {
                   <time>{relativeTime(continueTarget.session.updated_at)}</time>
                 </button>
               )}
-              {filteredSessions.map((session) => <button key={sessionRowKey(session.id, session.profile)} className="session-row" onClick={() => openSession(session)}><div className="session-dot">{session.running ? <Radio size={15} /> : <MessageCircle size={15} />}</div><div className="session-copy"><strong>{session.title || session.preview || 'Untitled session'}</strong><span>{session.preview || session.source || session.id}</span><small>{[session.message_count ? `${session.message_count} messages` : '', session.profile, session.workspace, session.source].filter(Boolean).join(' · ')}</small></div><time>{relativeTime(session.updated_at)}</time></button>)}
+              {filteredSessions.map((session) => {
+                const fromSearch = Boolean(sessionFilter.trim()) && !loadedRowKeys.has(sessionRowKey(session.id, session.profile));
+                return <button key={sessionRowKey(session.id, session.profile)} className={`session-row ${fromSearch ? 'search-hit' : ''}`} data-search-hit={fromSearch ? 'true' : undefined} onClick={() => openSession(session)}><div className="session-dot">{session.running ? <Radio size={15} /> : fromSearch ? <Search size={15} /> : <MessageCircle size={15} />}</div><div className="session-copy"><strong>{session.title || session.preview || 'Untitled session'}</strong><span>{session.preview || session.source || session.id}</span><small>{[fromSearch ? 'found by search' : '', session.message_count ? `${session.message_count} messages` : '', session.profile, session.workspace, session.source].filter(Boolean).join(' · ')}</small></div><time>{relativeTime(session.updated_at)}</time></button>;
+              })}
               {canLoadMore && <button className="load-more" onClick={loadMoreSessions} disabled={sessionsLoading}>{sessionsLoading ? 'Loading…' : `Load more (${Math.min(75, (sessionPage.total ?? sessions.length) - sessions.length)} more)`}</button>}
             </div>
           </section>
@@ -1479,7 +1545,8 @@ export function App() {
               )}
               <button type="button" className="refresh-chat" onClick={() => refreshHistory()} disabled={!history || history.load !== 'idle'}><RefreshCw size={15} /> Refresh transcript</button>
               <button type="button" className={`voice-toggle ${voiceOpen ? 'on' : ''}`} aria-pressed={voiceOpen} aria-label={voiceOpen ? 'Close voice' : 'Open voice'} onClick={toggleVoice}><Mic size={15} /> Voice</button>
-              {inDefaultChat && <button type="button" className={`bob-pin ${isCurrentBob ? 'on' : ''}`} aria-pressed={isCurrentBob} aria-label={isCurrentBob ? 'Remove Bob main pin' : 'Set as Bob main'} onClick={toggleBobMain}><Star size={15} /> {isCurrentBob ? 'Bob main' : 'Set as Bob main'}</button>}
+              {inDefaultChat && <button type="button" className={`main-pin ${isCurrentMain ? 'on' : ''}`} aria-pressed={isCurrentMain} aria-label={isCurrentMain ? `Remove ${MAIN_PIN_LABEL} pin` : `Set as ${MAIN_PIN_LABEL}`} onClick={() => togglePin('main')}><Star size={15} /> {isCurrentMain ? MAIN_PIN_LABEL : `Set as ${MAIN_PIN_LABEL}`}</button>}
+              {inDefaultChat && <button type="button" className={`chat-pin ${isCurrentPinned ? 'on' : ''}`} aria-pressed={isCurrentPinned} aria-label={isCurrentPinned ? 'Unpin from Conversations' : 'Pin to Conversations'} onClick={() => togglePin('pinned')}><Pin size={15} /> {isCurrentPinned ? 'Pinned' : 'Pin'}</button>}
             </div>
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
               {lineageNote && <div className="history-state" role="status">{lineageNote}</div>}
@@ -1555,28 +1622,31 @@ export function App() {
         </div>
       )}
 
-      {bobDialog && (
+      {pinDialog && (
         <div className="sheet-backdrop" role="presentation">
-          <section className="new-chat-sheet" role="dialog" aria-modal="true" aria-labelledby="bob-dialog-title">
+          <section className="new-chat-sheet" role="dialog" aria-modal="true" aria-labelledby="pin-dialog-title">
             <div className="sheet-handle" aria-hidden="true" />
             <div className="sheet-header">
               <div>
-                <div className="eyebrow">Voice shortcut</div>
-                <h2 id="bob-dialog-title">Talk to Bob</h2>
+                <div className="eyebrow">{pinDialog.slot === 'main' ? 'Voice shortcut' : 'Conversations shortcut'}</div>
+                <h2 id="pin-dialog-title">{pinDialog.slot === 'main' ? `Talk to ${ASSISTANT_NAME}` : 'Pinned chat'}</h2>
               </div>
-              <button type="button" className="icon-btn" aria-label="Close dialog" onClick={() => setBobDialog(null)}><X size={18} /></button>
+              <button type="button" className="icon-btn" aria-label="Close dialog" onClick={() => setPinDialog(null)}><X size={18} /></button>
             </div>
-            {bobDialog.kind === 'setup' && <p className="sheet-copy">Talk to Bob opens one pinned conversation in the default profile and lets you speak to it. Open your main Bob chat, then tap <strong>Set as Bob main</strong> at the top of that chat. Nothing is guessed from titles, and no separate voice chat is created.</p>}
-            {bobDialog.kind === 'stale' && <p className="sheet-copy">Your pinned Bob chat is no longer available on this host in the default profile. Clear the pin, or choose another chat and set it as Bob main.</p>}
-            {bobDialog.kind === 'manage' && <p className="sheet-copy">Bob main is pinned to <strong>{bobRef?.title || 'an untitled chat'}</strong> in the default profile. Clear it, or choose another chat and set it as Bob main.</p>}
-            {bobDialog.kind === 'error' && <p className="sheet-copy">{bobDialog.message} Your pin was kept.</p>}
+            {pinDialog.slot === 'main' && pinDialog.kind === 'setup' && <p className="sheet-copy">Talk to {ASSISTANT_NAME} opens one pinned conversation in the default profile and lets you speak to it. Open your main {ASSISTANT_NAME} chat, then tap <strong>Set as {MAIN_PIN_LABEL}</strong> at the top of that chat. Nothing is guessed from titles, and no separate voice chat is created.</p>}
+            {pinDialog.slot === 'main' && pinDialog.kind === 'stale' && <p className="sheet-copy">Your pinned {ASSISTANT_NAME} chat is no longer available on this host in the default profile. Clear the pin, or choose another chat and set it as {MAIN_PIN_LABEL}.</p>}
+            {pinDialog.slot === 'main' && pinDialog.kind === 'manage' && <p className="sheet-copy">{MAIN_PIN_LABEL} is pinned to <strong>{pins.main?.title || 'an untitled chat'}</strong> in the default profile. Clear it, or choose another chat and set it as {MAIN_PIN_LABEL}.</p>}
+            {pinDialog.slot === 'pinned' && pinDialog.kind === 'setup' && <p className="sheet-copy">Open a chat in the default profile, then tap <strong>Pin</strong> at the top of that chat to keep it one tap away on Conversations. It opens in text mode.</p>}
+            {pinDialog.slot === 'pinned' && pinDialog.kind === 'stale' && <p className="sheet-copy">Your pinned chat is no longer available on this host in the default profile. Clear the pin, or choose another chat and tap <strong>Pin</strong>.</p>}
+            {pinDialog.slot === 'pinned' && pinDialog.kind === 'manage' && <p className="sheet-copy"><strong>{pins.pinned?.title || 'An untitled chat'}</strong> is pinned to Conversations in the default profile. Clear it, or choose another chat and tap <strong>Pin</strong>.</p>}
+            {pinDialog.kind === 'error' && <p className="sheet-copy">{pinDialog.message} Your pin was kept.</p>}
             <div className="sheet-actions">
-              {bobDialog.kind === 'setup' && <button type="button" className="secondary" onClick={() => setBobDialog(null)}>Cancel</button>}
-              {(bobDialog.kind === 'stale' || bobDialog.kind === 'manage') && <button type="button" className="secondary" onClick={clearBobMain}>Clear Bob main</button>}
-              {bobDialog.kind === 'error' && <button type="button" className="secondary" onClick={() => { setBobDialog(null); void talkToBob(); }}>Try again</button>}
-              {bobDialog.kind === 'error'
-                ? <button type="button" className="primary" onClick={() => setBobDialog(null)}>Close</button>
-                : <button type="button" className="primary" onClick={() => void chooseBobChat()}>{bobDialog.kind === 'setup' ? 'Choose a chat' : 'Choose another chat'}</button>}
+              {pinDialog.kind === 'setup' && <button type="button" className="secondary" onClick={() => setPinDialog(null)}>Cancel</button>}
+              {(pinDialog.kind === 'stale' || pinDialog.kind === 'manage') && <button type="button" className="secondary" onClick={() => clearPin(pinDialog.slot)}>{pinDialog.slot === 'main' ? `Clear ${MAIN_PIN_LABEL}` : 'Clear pinned chat'}</button>}
+              {pinDialog.kind === 'error' && <button type="button" className="secondary" onClick={() => { const { slot } = pinDialog; setPinDialog(null); void openPinnedChat(slot); }}>Try again</button>}
+              {pinDialog.kind === 'error'
+                ? <button type="button" className="primary" onClick={() => setPinDialog(null)}>Close</button>
+                : <button type="button" className="primary" onClick={() => void choosePinChat()}>{pinDialog.kind === 'setup' ? 'Choose a chat' : 'Choose another chat'}</button>}
             </div>
           </section>
         </div>

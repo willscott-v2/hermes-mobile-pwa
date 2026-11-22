@@ -1,11 +1,11 @@
 import { expect, Page, test } from '@playwright/test';
 
-// Voice mode and the Talk to Bob shortcut, end to end in mock mode. The deterministic
+// Voice mode and the Talk to Hermes shortcut, end to end in mock mode. The deterministic
 // FakeVoiceBackend stands in for the microphone, STT/TTS sockets and provider (no real audio, no
 // credentials); `window.__fakeVoice` exposes its script and a serializable call log.
 
 const MOCK_ORIGIN_KEY = 'https://mock.hermes.invalid';
-const TRANSCRIPT = 'Hello Bob, what is on my plate today?';
+const TRANSCRIPT = 'Hello there, what is on my plate today?';
 
 async function enableMock(page: Page) {
   await page.goto('/?e2e=voice');
@@ -45,7 +45,7 @@ test.describe('generic voice in an ordinary chat', () => {
     await script(page, { transcript: TRANSCRIPT });
     await page.getByRole('button', { name: 'Start talking' }).click();
     await expect(panel(page).getByRole('status')).toContainText('Listening');
-    await expect(panel(page)).toContainText('Hello Bob,'); // ephemeral partial caption
+    await expect(panel(page)).toContainText('Hello there,'); // ephemeral partial caption
     await page.getByRole('button', { name: 'Stop and send' }).click();
 
     // The transcript lands in ordinary text history exactly once, then the assistant answers.
@@ -306,32 +306,32 @@ test.describe('voice layout', () => {
   });
 });
 
-test.describe('Talk to Bob', () => {
+test.describe('Talk to Hermes', () => {
   test('without a pin it offers a clear, safe setup path and never guesses a chat', async ({ page }) => {
     await enableMock(page);
-    const shortcut = page.getByRole('button', { name: 'Set up Talk to Bob' });
+    const shortcut = page.getByRole('button', { name: 'Set up Talk to Hermes' });
     await expect(shortcut).toBeVisible();
     expect((await shortcut.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await shortcut.click();
-    const dialog = page.getByRole('dialog', { name: 'Talk to Bob' });
-    await expect(dialog).toContainText('Set as Bob main');
+    const dialog = page.getByRole('dialog', { name: 'Talk to Hermes' });
+    await expect(dialog).toContainText('Set as Hermes main');
     await dialog.getByRole('button', { name: 'Choose a chat' }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
     await expect(page.locator('.chat-screen')).toHaveCount(0);
   });
 
-  test('pin from an open default chat, then Talk to Bob resumes that exact session with voice open', async ({ page }) => {
+  test('pin from an open default chat, then Talk to Hermes resumes that exact session with voice open', async ({ page }) => {
     await enableMock(page);
     await openChat(page, 'Weekend reading');
-    const pin = page.getByRole('button', { name: 'Set as Bob main' });
+    const pin = page.getByRole('button', { name: 'Set as Hermes main' });
     expect((await pin.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await pin.click();
-    await expect(page.getByRole('button', { name: 'Remove Bob main pin' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Remove Hermes main pin' })).toBeVisible();
     await page.getByRole('button', { name: 'Back to sessions' }).click();
     const countBefore = await page.locator('.session-summary').innerText();
-    await expect(page.getByRole('button', { name: 'Talk to Bob' })).toBeVisible();
-    await page.getByRole('button', { name: 'Talk to Bob' }).click();
+    await expect(page.getByRole('button', { name: 'Talk to Hermes' })).toBeVisible();
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
     await expect(page.getByRole('heading', { name: 'Weekend reading' })).toBeVisible();
     await expect(panel(page)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Start talking' })).toBeEnabled();
@@ -345,11 +345,11 @@ test.describe('Talk to Bob', () => {
   test('from another profile it switches to default before resolving and never leaks the other profile', async ({ page }) => {
     await enableMock(page);
     await openChat(page, 'Weekend reading');
-    await page.getByRole('button', { name: 'Set as Bob main' }).click();
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
     await page.getByRole('button', { name: 'Back to sessions' }).click();
     await switchProfile(page, 'sales-test');
     await expect(page.getByText(/Launch campaign/)).toBeVisible();
-    await page.getByRole('button', { name: 'Talk to Bob' }).click();
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
     await expect(page.getByRole('heading', { name: 'Weekend reading' })).toBeVisible();
     await expect(page.locator('.eyebrow').first()).toContainText('default');
     await page.getByRole('button', { name: 'Back to sessions' }).click();
@@ -358,14 +358,14 @@ test.describe('Talk to Bob', () => {
     await expect(page.getByText('Private default task')).toBeVisible();
   });
 
-  test('a Talk to Bob resolve that finishes after the user opened another chat does nothing', async ({ page }) => {
+  test('a Talk to Hermes resolve that finishes after the user opened another chat does nothing', async ({ page }) => {
     await enableMock(page);
     await openChat(page, 'Weekend reading');
-    await page.getByRole('button', { name: 'Set as Bob main' }).click();
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
     await page.getByRole('button', { name: 'Back to sessions' }).click();
     await page.evaluate(() => (window as any).__mockHoldNextSessionDetail());
-    await page.getByRole('button', { name: 'Talk to Bob' }).click();
-    await expect(page.getByRole('button', { name: 'Opening Bob…' })).toBeVisible();
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
+    await expect(page.getByRole('button', { name: 'Opening Hermes…' })).toBeVisible();
     await openChat(page, 'Lisbon trip');
     await page.evaluate(() => (window as any).__mockReleaseSessionDetail());
     await expect(page.getByRole('button', { name: 'Open voice' })).toBeVisible();
@@ -375,83 +375,83 @@ test.describe('Talk to Bob', () => {
     await expect(panel(page)).toHaveCount(0);
   });
 
-  test('navigation during the profile switch itself invalidates Talk to Bob', async ({ page }) => {
+  test('navigation during the profile switch itself invalidates Talk to Hermes', async ({ page }) => {
     await enableMock(page);
     await openChat(page, 'Weekend reading');
-    await page.getByRole('button', { name: 'Set as Bob main' }).click();
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
     await page.getByRole('button', { name: 'Back to sessions' }).click();
     await switchProfile(page, 'sales-test');
     await expect(page.getByText(/Launch campaign/)).toBeVisible();
-    // Hold the default profile's session list: the switch inside Talk to Bob stays pending.
+    // Hold the default profile's session list: the switch inside Talk to Hermes stays pending.
     await page.evaluate(() => (window as any).__mockHoldNextSessionPage());
-    await page.getByRole('button', { name: 'Talk to Bob' }).click();
-    await expect(page.getByRole('button', { name: 'Opening Bob…' })).toBeVisible();
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
+    await expect(page.getByRole('button', { name: 'Opening Hermes…' })).toBeVisible();
     // The user starts a fresh chat while the switch is still loading.
     await page.getByRole('button', { name: 'New chat' }).click();
     await page.getByRole('button', { name: 'Start chat' }).click();
     await expect(page.locator('.chat-screen')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
     await page.evaluate(() => (window as any).__mockReleaseSessionPage());
-    await expect(page.getByRole('button', { name: 'Talk to Bob' })).toHaveCount(0); // still in the chat screen
+    await expect(page.getByRole('button', { name: 'Talk to Hermes' })).toHaveCount(0); // still in the chat screen
     await page.waitForTimeout(500);
     await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Weekend reading' })).toHaveCount(0);
     await expect(panel(page)).toHaveCount(0);
-    await expect(page.getByRole('dialog', { name: 'Talk to Bob' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Talk to Hermes' })).toHaveCount(0);
     expect((await fake(page)).speeches).toHaveLength(0);
   });
 
-  test('a Talk to Bob resolve that finishes after the user went back does nothing', async ({ page }) => {
+  test('a Talk to Hermes resolve that finishes after the user went back does nothing', async ({ page }) => {
     await enableMock(page);
     await openChat(page, 'Weekend reading');
-    await page.getByRole('button', { name: 'Set as Bob main' }).click();
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
     await page.getByRole('button', { name: 'Back to sessions' }).click();
     await page.evaluate(() => (window as any).__mockHoldNextSessionDetail());
-    await page.getByRole('button', { name: 'Talk to Bob' }).click();
-    await expect(page.getByRole('button', { name: 'Opening Bob…' })).toBeVisible();
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
+    await expect(page.getByRole('button', { name: 'Opening Hermes…' })).toBeVisible();
     await openChat(page, 'Lisbon trip');
     await page.getByRole('button', { name: 'Back to sessions' }).click();
     await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
     await page.evaluate(() => (window as any).__mockReleaseSessionDetail());
-    await expect(page.getByRole('button', { name: 'Talk to Bob' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Talk to Hermes' })).toBeVisible();
     await page.waitForTimeout(400);
     await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
     await expect(page.locator('.chat-screen')).toHaveCount(0);
-    await expect(page.getByRole('dialog', { name: 'Talk to Bob' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Talk to Hermes' })).toHaveCount(0);
   });
 
   test('the pin control exists only in default-profile chats', async ({ page }) => {
     await enableMock(page);
     await switchProfile(page, 'sales-test');
     await openChat(page, 'Launch campaign');
-    await expect(page.getByRole('button', { name: 'Set as Bob main' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Set as Hermes main' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Open voice' })).toBeVisible(); // voice itself is generic
   });
 
   test('a stale pin fails safely and can be cleared or reconfigured', async ({ page }) => {
     await page.addInitScript((origin) => {
-      window.localStorage.setItem('hermes-mobile-pwa.bob-main.v1', JSON.stringify({ v: 2, entries: { [origin]: { sessionId: 'session-that-no-longer-exists', title: 'Old Bob', savedAt: new Date().toISOString() } } }));
+      window.localStorage.setItem('hermes-mobile-pwa.main-chat.v1', JSON.stringify({ v: 2, entries: { [origin]: { sessionId: 'session-that-no-longer-exists', title: 'Old main', savedAt: new Date().toISOString() } } }));
     }, MOCK_ORIGIN_KEY);
     await enableMock(page);
-    await page.getByRole('button', { name: 'Talk to Bob' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Talk to Bob' });
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Talk to Hermes' });
     await expect(dialog).toContainText('no longer available');
     await expect(page.locator('.chat-screen')).toHaveCount(0);
-    await dialog.getByRole('button', { name: 'Clear Bob main' }).click();
+    await dialog.getByRole('button', { name: 'Clear Hermes main' }).click();
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Set up Talk to Bob' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Set up Talk to Hermes' })).toBeVisible();
   });
 
-  test('Bob main settings can clear a working pin', async ({ page }) => {
+  test('Hermes main settings can clear a working pin', async ({ page }) => {
     await enableMock(page);
     await openChat(page, 'Weekend reading');
-    await page.getByRole('button', { name: 'Set as Bob main' }).click();
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
     await page.getByRole('button', { name: 'Back to sessions' }).click();
-    await page.getByRole('button', { name: 'Bob main settings' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Talk to Bob' });
+    await page.getByRole('button', { name: 'Hermes main settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Talk to Hermes' });
     await expect(dialog).toContainText('Weekend reading');
-    await dialog.getByRole('button', { name: 'Clear Bob main' }).click();
-    await expect(page.getByRole('button', { name: 'Set up Talk to Bob' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Clear Hermes main' }).click();
+    await expect(page.getByRole('button', { name: 'Set up Talk to Hermes' })).toBeVisible();
   });
 
   test('the Conversations surface has no horizontal overflow with the shortcut at 390px', async ({ page }) => {
@@ -459,5 +459,102 @@ test.describe('Talk to Bob', () => {
     await enableMock(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
     await expect(page.getByRole('button', { name: 'New chat' })).toBeVisible();
+  });
+});
+
+test.describe('Pinned chat (second pin)', () => {
+  const pinnedButton = (page: Page) => page.getByRole('button', { name: /^Open pinned chat/ });
+
+  test('pins a second chat beside the main one; each opens its own chat, and the second opens in text mode', async ({ page }) => {
+    await enableMock(page);
+    await openChat(page, 'Weekend reading');
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    await openChat(page, 'Morning news digest'); // a non-desktop (cron) source, like an automation inbox
+    const pin = page.getByRole('button', { name: 'Pin to Conversations' });
+    expect((await pin.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await pin.click();
+    await expect(page.getByRole('button', { name: 'Unpin from Conversations' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Set as Hermes main' })).toBeVisible(); // still not the main pin
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+
+    await enableMock(page); // reload: both pins persist
+    await expect(page.getByRole('button', { name: 'Talk to Hermes' })).toBeVisible();
+    await expect(pinnedButton(page)).toHaveAccessibleName('Open pinned chat: Morning news digest');
+
+    await pinnedButton(page).click();
+    await expect(page.getByRole('heading', { name: 'Morning news digest' })).toBeVisible();
+    await expect(panel(page)).toHaveCount(0); // text mode: voice not opened
+    await expect(page.getByRole('button', { name: 'Open voice' })).toHaveAttribute('aria-pressed', 'false');
+    await openVoice(page); // ...but voice is still available in this chat, like any other
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+
+    await page.getByRole('button', { name: 'Talk to Hermes' }).click();
+    await expect(page.getByRole('heading', { name: 'Weekend reading' })).toBeVisible();
+    await expect(panel(page)).toBeVisible(); // the main pin still opens with voice on
+  });
+
+  test('a session sits in one slot only: pinning the main chat as the second pin moves it', async ({ page }) => {
+    await enableMock(page);
+    await openChat(page, 'Weekend reading');
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
+    await page.getByRole('button', { name: 'Pin to Conversations' }).click();
+    await expect(page.locator('.inline-banner')).toContainText('It is no longer Hermes main.');
+    await expect(page.getByRole('button', { name: 'Set as Hermes main' })).toBeVisible();
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
+    await expect(page.locator('.inline-banner')).toContainText('It is no longer the pinned chat.');
+    await expect(page.getByRole('button', { name: 'Pin to Conversations' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    await expect(pinnedButton(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Talk to Hermes' })).toBeVisible();
+  });
+
+  test('a stale second pin fails safely, keeps the main pin, and can be cleared', async ({ page }) => {
+    await page.addInitScript((origin) => {
+      const entry = (sessionId: string, title: string) => JSON.stringify({ v: 2, entries: { [origin]: { sessionId, title, savedAt: new Date().toISOString() } } });
+      window.localStorage.setItem('hermes-mobile-pwa.main-chat.v1', entry('mock-weekend-reading', 'Weekend reading'));
+      window.localStorage.setItem('hermes-mobile-pwa.pinned-chat.v1', entry('session-that-no-longer-exists', 'Old inbox'));
+    }, MOCK_ORIGIN_KEY);
+    await enableMock(page);
+    await pinnedButton(page).click();
+    const dialog = page.getByRole('dialog', { name: 'Pinned chat' });
+    await expect(dialog).toContainText('no longer available');
+    await expect(page.locator('.chat-screen')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Clear pinned chat' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(pinnedButton(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Talk to Hermes' })).toBeVisible(); // main pin untouched
+  });
+
+  test('from another profile the second pin switches to default first and opens in text mode', async ({ page }) => {
+    await enableMock(page);
+    await openChat(page, 'Morning news digest');
+    await page.getByRole('button', { name: 'Pin to Conversations' }).click();
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    await switchProfile(page, 'sales-test');
+    await openChat(page, 'Launch campaign');
+    await expect(page.getByRole('button', { name: 'Pin to Conversations' })).toHaveCount(0); // default-profile chats only
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    await pinnedButton(page).click();
+    await expect(page.getByRole('heading', { name: 'Morning news digest' })).toBeVisible();
+    await expect(panel(page)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    await expect(page.getByRole('button', { name: /Active profile/ })).toContainText('default');
+  });
+
+  test('Conversations with both pins fits 390px with no horizontal overflow', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 664 });
+    await enableMock(page);
+    await openChat(page, 'Weekend reading');
+    await page.getByRole('button', { name: 'Set as Hermes main' }).click();
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    await openChat(page, 'Morning news digest');
+    await page.getByRole('button', { name: 'Pin to Conversations' }).click();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: 'test-results/pins-chat-header-390.png' });
+    await page.getByRole('button', { name: 'Back to sessions' }).click();
+    expect((await pinnedButton(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: 'test-results/pins-conversations-390.png' });
   });
 });

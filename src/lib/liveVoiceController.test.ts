@@ -4,7 +4,7 @@ import { delegationPrompt, LiveSessionLike, LiveVoiceController, LiveVoiceContro
 import { ACK_TEXT, CANCELLED_TEXT, LiveScope, LiveVoiceState, QUEUED_ACK_TEXT } from './liveVoiceMachine';
 import { LiveSessionHandlers, LiveTranscriptFragment, LiveVoiceSessionError } from './liveVoiceSession';
 
-const scope: LiveScope = { profile: 'default', sessionId: 'bob-live' };
+const scope: LiveScope = { profile: 'default', sessionId: 'main-live' };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 class FakeSession implements LiveSessionLike {
@@ -127,15 +127,15 @@ describe('delegations → the pinned session', () => {
   it('new work submits with surface context to the scope session, acks once when the turn starts, speaks the result once', async () => {
     const { controller, submit, session, phase } = await live();
     session().delegate('d1', userTurn('what is on my plate'));
-    expect(submit).toHaveBeenCalledWith('bob-live', 'what is on my plate', 'User: what is on my plate');
+    expect(submit).toHaveBeenCalledWith('main-live', 'what is on my plate', 'User: what is on my plate');
     expect(phase()).toBe('working');
     await flush();
     expect(session().sayCalls()).toEqual([['say', 'd1', ACK_TEXT]]);
-    controller.gatewayEvent({ type: 'message.start', session_id: 'bob-live' });
-    controller.gatewayEvent({ type: 'message.delta', session_id: 'bob-live', payload: { text: 'Three ' } });
-    controller.gatewayEvent({ type: 'message.delta', session_id: 'bob-live', payload: { text: 'things.' } });
-    controller.gatewayEvent({ type: 'message.complete', session_id: 'bob-live', payload: { text: 'Three things.' } });
-    controller.gatewayEvent({ type: 'message.complete', session_id: 'bob-live', payload: { text: 'Three things.' } }); // duplicate
+    controller.gatewayEvent({ type: 'message.start', session_id: 'main-live' });
+    controller.gatewayEvent({ type: 'message.delta', session_id: 'main-live', payload: { text: 'Three ' } });
+    controller.gatewayEvent({ type: 'message.delta', session_id: 'main-live', payload: { text: 'things.' } });
+    controller.gatewayEvent({ type: 'message.complete', session_id: 'main-live', payload: { text: 'Three things.' } });
+    controller.gatewayEvent({ type: 'message.complete', session_id: 'main-live', payload: { text: 'Three things.' } }); // duplicate
     expect(session().sayCalls()).toEqual([['say', 'd1', ACK_TEXT], ['say', 'd1', 'Three things.']]);
     expect(phase()).toBe('live');
   });
@@ -154,9 +154,9 @@ describe('delegations → the pinned session', () => {
     session().delegate('d1', userTurn('book it for Friday'));
     session().delegate('d2', userTurn('no, Thursday not Friday'));
     await flush();
-    expect(steer).toHaveBeenCalledWith('bob-live', 'no, Thursday not Friday');
+    expect(steer).toHaveBeenCalledWith('main-live', 'no, Thursday not Friday');
     expect(submit).toHaveBeenCalledTimes(1);
-    controller.gatewayEvent({ type: 'message.complete', session_id: 'bob-live', payload: { text: 'Booked Thursday.' } });
+    controller.gatewayEvent({ type: 'message.complete', session_id: 'main-live', payload: { text: 'Booked Thursday.' } });
     expect(session().sayCalls().at(-1)).toEqual(['say', 'd2', 'Booked Thursday.']);
   });
 
@@ -174,7 +174,7 @@ describe('delegations → the pinned session', () => {
     session().delegate('d1', userTurn('long task'));
     session().delegate('d2', userTurn('never mind, cancel that'));
     await flush();
-    expect(interrupt).toHaveBeenCalledWith('bob-live');
+    expect(interrupt).toHaveBeenCalledWith('main-live');
     expect(steer).not.toHaveBeenCalled();
     expect(submit).toHaveBeenCalledTimes(1);
     expect(session().sayCalls().at(-1)).toEqual(['say', 'd2', CANCELLED_TEXT]);
@@ -187,7 +187,7 @@ describe('delegations → the pinned session', () => {
     session().delegate('d2', userTurn('and the weather'));
     expect(submit).toHaveBeenCalledTimes(1);
     expect(session().sayCalls().at(-1)).toEqual(['say', 'd2', QUEUED_ACK_TEXT]);
-    controller.gatewayEvent({ type: 'message.complete', session_id: 'bob-live', payload: { text: 'done' } });
+    controller.gatewayEvent({ type: 'message.complete', session_id: 'main-live', payload: { text: 'done' } });
     expect(submit).toHaveBeenCalledTimes(2);
     expect(submit.mock.calls[1][1]).toBe('and the weather');
   });
@@ -197,7 +197,7 @@ describe('delegations → the pinned session', () => {
     session().delegate('d1', userTurn('x'));
     await flush();
     expect(session().sayCalls()).toHaveLength(1);
-    expect(session().sayCalls()[0][2]).toMatch(/could not reach Bob/);
+    expect(session().sayCalls()[0][2]).toMatch(/could not reach /);
     expect(controller.getState().phase).toBe('live');
     expect(controller.getState().notice).not.toContain('abc');
   });
@@ -247,9 +247,9 @@ describe('lifecycle', () => {
 
   it('a profile change releases too; the same scope is a no-op', async () => {
     const { controller, session } = await live();
-    controller.scopeChanged({ profile: 'default', sessionId: 'bob-live' });
+    controller.scopeChanged({ profile: 'default', sessionId: 'main-live' });
     expect(session().log).not.toContainEqual(['release']);
-    controller.scopeChanged({ profile: 'sales-test', sessionId: 'bob-live' });
+    controller.scopeChanged({ profile: 'sales-test', sessionId: 'main-live' });
     expect(session().log).toContainEqual(['release']);
   });
 
@@ -273,8 +273,8 @@ describe('lifecycle', () => {
     const { controller, session } = await live();
     session().delegate('d1', userTurn('x'));
     controller.pageHidden();
-    controller.gatewayEvent({ type: 'message.complete', session_id: 'bob-live', payload: { text: 'Done it.' } });
-    controller.gatewayEvent({ type: 'message.complete', session_id: 'bob-live', payload: { text: 'Done it.' } });
+    controller.gatewayEvent({ type: 'message.complete', session_id: 'main-live', payload: { text: 'Done it.' } });
+    controller.gatewayEvent({ type: 'message.complete', session_id: 'main-live', payload: { text: 'Done it.' } });
     expect(session().sayCalls().filter(([, , text]) => text === 'Done it.')).toHaveLength(1);
   });
 

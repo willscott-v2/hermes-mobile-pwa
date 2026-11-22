@@ -13,6 +13,12 @@ const patterns = [
   [/\/Users\/(?:bob|willscott)\b/, 'local user path'],
 ];
 const allowFiles = new Set(['README.md', 'SECURITY.md', 'docs/ARCHITECTURE.md', '.env.example']);
+// App code ships to the public repo: the owner's personal assistant name belongs in a gitignored
+// VITE_ASSISTANT_NAME (e.g. .env.local), never hardcoded in source, tests or static assets.
+const appCode = /^(?:src|tests|public)\//;
+const appCodePatterns = [
+  [/\bbob\b|bob[’']s house/i, 'personal assistant name in app code (use VITE_ASSISTANT_NAME)'],
+];
 const findings = [];
 function walk(dir) {
   for (const entry of readdirSync(dir)) {
@@ -25,6 +31,11 @@ function walk(dir) {
       const text = readFileSync(path, 'utf8');
       for (const [regex, label] of patterns) {
         if (regex.test(text) && !allowFiles.has(rel)) findings.push(`${rel}: ${label}`);
+      }
+      if (appCode.test(rel.split('\\').join('/')) && !/\.(?:png|jpe?g|gif|webp|ico)$/i.test(rel)) {
+        for (const [regex, label] of appCodePatterns) {
+          if (regex.test(text)) findings.push(`${rel}: ${label}`);
+        }
       }
     }
   }

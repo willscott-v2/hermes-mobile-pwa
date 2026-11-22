@@ -1,5 +1,5 @@
 // Pure state machine for LIVE voice: one full-duplex GPT-Live session bound to exactly one Hermes
-// session (the pinned Bob chat). Sibling of voiceMachine.ts (the chained dictate → turn → TTS mode);
+// session (whichever chat is open; "Talk to" opens the main pinned chat). Sibling of voiceMachine.ts (the chained dictate → turn → TTS mode);
 // the two are deliberately separate because this mode has no dictation/submit/speak turn cycle: the
 // voice model owns the microphone and the speaker, and every real request arrives as a DELEGATION.
 //
@@ -11,6 +11,8 @@
 //   - exactly one brief acknowledgement per delegation, when work is seen to start;
 //   - scope change, hang-up, reset, fatal failure, connection loss and background teardown all emit
 //     `release-all`, which must close the peer connection, stop the mic tracks and silence playback.
+
+import { ASSISTANT_NAME } from './assistantName';
 
 export type LivePhase = 'idle' | 'connecting' | 'live' | 'working' | 'error';
 
@@ -104,8 +106,8 @@ export const ACK_TEXT = 'On it.';
 export const QUEUED_ACK_TEXT = 'Got it. I will do that after the current task.';
 export const CANCELLED_TEXT = 'Okay, I stopped that.';
 export const NOTHING_RUNNING_TEXT = 'Nothing is running right now.';
-export const NO_RESULT_TEXT = 'Bob finished that without a spoken result.';
-export const DELEGATION_FAILED_TEXT = 'Sorry, I could not reach Bob for that request.';
+export const NO_RESULT_TEXT = `${ASSISTANT_NAME} finished that without a spoken result.`;
+export const DELEGATION_FAILED_TEXT = `Sorry, I could not reach ${ASSISTANT_NAME} for that request.`;
 export const STOP_SPEECH_NOTE = 'The user asked you to stop talking. Stay quiet until they speak again.';
 
 export function initialLiveState(scope: LiveScope | null = null): LiveVoiceState {
@@ -252,13 +254,13 @@ export function transition(state: LiveVoiceState, event: LiveVoiceEvent): LiveVo
 
     case 'SESSION_CLOSED': {
       if (!ACTIVE.includes(state.phase)) return same(state);
-      const dropped = state.delegation ? ' Bob is still working; the answer lands in the chat.' : '';
+      const dropped = state.delegation ? ` ${ASSISTANT_NAME} is still working; the answer lands in the chat.` : '';
       const reason = event.reason === 'connection_lost' ? 'Live voice lost its connection.' : 'Live voice ended.';
       return same({ ...initialLiveState(state.scope), notice: `${reason}${dropped}` }, [{ type: 'release-all' }]);
     }
     case 'STOP': {
       if (state.phase === 'idle') return same(state);
-      const dropped = state.delegation ? 'Hung up. Bob is still working; the answer lands in the chat.' : '';
+      const dropped = state.delegation ? `Hung up. ${ASSISTANT_NAME} is still working; the answer lands in the chat.` : '';
       return same({ ...initialLiveState(state.scope), notice: dropped }, [{ type: 'release-all' }]);
     }
     case 'HIDDEN': {
